@@ -1,6 +1,7 @@
 /_local/
 /release/
 /.idea/
+/.superpowers/
 /.vscode/
 /.codex-remote-attachments/
 **/bin/
