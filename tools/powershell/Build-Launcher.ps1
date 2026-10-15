@@ -12,7 +12,8 @@ $arguments = @('/nologo', '/target:winexe', '/platform:x64', '/optimize+', "/out
     (Join-Path $source 'Program.cs'), (Join-Path $source 'ServerController.cs'),
     (Join-Path $source 'LauncherPreferences.cs'), (Join-Path $source 'LauncherSelfTest.cs'),
     (Join-Path $source 'ThemeChoice.cs'), (Join-Path $source 'ServiceButton.cs'),
-    (Join-Path $source 'ClosePolicy.cs'), (Join-Path $source 'ThemePalette.cs'))
+    (Join-Path $source 'ClosePolicy.cs'), (Join-Path $source 'ThemePalette.cs'),
+    (Join-Path $source 'ClosePromptForm.cs'), (Join-Path $source 'TrayIcon.cs'))
 if ($IconPath) {
     $icon = (Resolve-Path -LiteralPath $IconPath -ErrorAction Stop).Path
     $arguments += "/win32icon:$icon"
