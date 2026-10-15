@@ -10,6 +10,7 @@ namespace KairiseiLauncher
         {
             var failures = new List<string>();
             PreferenceTests(failures);
+            ThemeTests(failures);
             if (failures.Count == 0) return 0;
             try
             {
@@ -60,6 +61,21 @@ namespace KairiseiLauncher
         private static void Expect(List<string> failures, bool condition, string message)
         {
             if (!condition) failures.Add(message);
+        }
+
+        private static void ThemeTests(List<string> failures)
+        {
+            Expect(failures, ThemeRules.Next(ThemeChoice.System) == ThemeChoice.Light, "system goes to light");
+            Expect(failures, ThemeRules.Next(ThemeChoice.Light) == ThemeChoice.Dark, "light goes to dark");
+            Expect(failures, ThemeRules.Next(ThemeChoice.Dark) == ThemeChoice.System, "dark goes to system");
+            Expect(failures, ThemeRules.Caption(ThemeChoice.System) == "跟随系统", "system caption");
+            Expect(failures, ThemeRules.Caption(ThemeChoice.Light) == "浅色", "light caption");
+            Expect(failures, ThemeRules.Caption(ThemeChoice.Dark) == "深色", "dark caption");
+            Expect(failures, ThemeRules.Resolve(ThemeChoice.System, null) == ResolvedTheme.Light, "missing registry is light");
+            Expect(failures, ThemeRules.Resolve(ThemeChoice.System, 1) == ResolvedTheme.Light, "registry 1 is light");
+            Expect(failures, ThemeRules.Resolve(ThemeChoice.System, 0) == ResolvedTheme.Dark, "registry 0 is dark");
+            Expect(failures, ThemeRules.Resolve(ThemeChoice.Light, 0) == ResolvedTheme.Light, "fixed light ignores registry");
+            Expect(failures, ThemeRules.Resolve(ThemeChoice.Dark, 1) == ResolvedTheme.Dark, "fixed dark ignores registry");
         }
     }
 }

@@ -10,7 +10,8 @@ if (-not (Test-Path -LiteralPath $csc -PathType Leaf)) { throw 'Windows x64 with
 $arguments = @('/nologo', '/target:winexe', '/platform:x64', '/optimize+', "/out:$output", "/win32manifest:$(Join-Path $source 'Kairisei-Launcher.exe.manifest')",
     '/reference:System.dll', '/reference:System.Core.dll', '/reference:System.Drawing.dll', '/reference:System.Windows.Forms.dll', '/reference:System.Web.Extensions.dll',
     (Join-Path $source 'Program.cs'), (Join-Path $source 'ServerController.cs'),
-    (Join-Path $source 'LauncherPreferences.cs'), (Join-Path $source 'LauncherSelfTest.cs'))
+    (Join-Path $source 'LauncherPreferences.cs'), (Join-Path $source 'LauncherSelfTest.cs'),
+    (Join-Path $source 'ThemeChoice.cs'))
 if ($IconPath) {
     $icon = (Resolve-Path -LiteralPath $IconPath -ErrorAction Stop).Path
     $arguments += "/win32icon:$icon"
