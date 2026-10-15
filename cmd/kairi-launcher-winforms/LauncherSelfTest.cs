@@ -12,6 +12,7 @@ namespace KairiseiLauncher
             PreferenceTests(failures);
             ThemeTests(failures);
             ServiceButtonTests(failures);
+            CloseTests(failures);
             if (failures.Count == 0) return 0;
             try
             {
@@ -93,6 +94,21 @@ namespace KairiseiLauncher
         private static void ExpectButton(List<string> failures, ServiceButtonState state, string text, bool enabled, string message)
         {
             Expect(failures, state.Text == text && state.Enabled == enabled, message);
+        }
+
+        private static void CloseTests(List<string> failures)
+        {
+            Expect(failures, ClosePolicy.ForUserClose(CloseAction.Ask, true, false) == CloseOutcome.ShowPrompt, "ask shows prompt");
+            Expect(failures, ClosePolicy.ForUserClose(CloseAction.Tray, true, true) == CloseOutcome.HideToTray, "tray hides even while busy");
+            Expect(failures, ClosePolicy.ForUserClose(CloseAction.Exit, false, false) == CloseOutcome.ExitLauncher, "exit with no server");
+            Expect(failures, ClosePolicy.ForUserClose(CloseAction.Exit, true, false) == CloseOutcome.ExitAfterStop, "exit stops a running server");
+            Expect(failures, ClosePolicy.ForUserClose(CloseAction.Exit, true, true) == CloseOutcome.StayBecauseBusy, "busy exit stays");
+            Expect(failures, ClosePolicy.ForShutdown(false) == CloseOutcome.ExitLauncher, "shutdown without server");
+            Expect(failures, ClosePolicy.ForShutdown(true) == CloseOutcome.ExitAfterStop, "shutdown stops server");
+            Expect(failures, ClosePolicy.ForTaskManager() == CloseOutcome.ExitLauncher, "task manager exits");
+            Expect(failures, ClosePolicy.Remembered(true, false) == CloseAction.Ask, "unchecked remember stays ask");
+            Expect(failures, ClosePolicy.Remembered(true, true) == CloseAction.Tray, "remember tray");
+            Expect(failures, ClosePolicy.Remembered(false, true) == CloseAction.Exit, "remember exit");
         }
     }
 }
