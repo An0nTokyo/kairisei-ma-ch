@@ -55,6 +55,9 @@ namespace KairiseiLauncher
                 return required.All(value => File.Exists(Path.Combine(root, value))) ? 0 : 2;
             }
 
+            if (args.Any(value => String.Equals(value, "--self-test", StringComparison.OrdinalIgnoreCase)))
+                return LauncherSelfTest.Run();
+
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new LauncherForm());

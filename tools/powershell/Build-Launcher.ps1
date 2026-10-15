@@ -9,7 +9,8 @@ $csc = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
 if (-not (Test-Path -LiteralPath $csc -PathType Leaf)) { throw 'Windows x64 with .NET Framework 4 is required.' }
 $arguments = @('/nologo', '/target:winexe', '/platform:x64', '/optimize+', "/out:$output", "/win32manifest:$(Join-Path $source 'Kairisei-Launcher.exe.manifest')",
     '/reference:System.dll', '/reference:System.Core.dll', '/reference:System.Drawing.dll', '/reference:System.Windows.Forms.dll', '/reference:System.Web.Extensions.dll',
-    (Join-Path $source 'Program.cs'), (Join-Path $source 'ServerController.cs'))
+    (Join-Path $source 'Program.cs'), (Join-Path $source 'ServerController.cs'),
+    (Join-Path $source 'LauncherPreferences.cs'), (Join-Path $source 'LauncherSelfTest.cs'))
 if ($IconPath) {
     $icon = (Resolve-Path -LiteralPath $IconPath -ErrorAction Stop).Path
     $arguments += "/win32icon:$icon"
@@ -21,4 +22,6 @@ if ($DryRun -or -not $PSCmdlet.ShouldProcess($output, 'Build Windows launcher; r
 New-Item -ItemType Directory -Path (Split-Path -Parent $output) -Force | Out-Null
 & $csc @arguments
 if ($LASTEXITCODE -ne 0) { throw 'Launcher build failed.' }
+& $output --self-test
+if ($LASTEXITCODE -ne 0) { throw 'Launcher self-test failed.' }
 Write-Output $output
