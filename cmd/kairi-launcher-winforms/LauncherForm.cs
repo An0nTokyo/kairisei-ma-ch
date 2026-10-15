@@ -50,6 +50,7 @@ namespace KairiseiLauncher
         private OperationKind operationKind;
         private ServerState latestState;
         private string operationMessage = "";
+        private bool promptOpen;
         private bool allowExit;
         private bool shutdownStarted;
         private LauncherPreferences preferences;
@@ -66,6 +67,9 @@ namespace KairiseiLauncher
             resolved = ThemeRules.Resolve(themeChoice, ReadAppsUseLightTheme());
             palette = ThemePalette.For(resolved);
             captionHost = new ThemeCaptionHost(CycleTheme, PaintThemeGlyph);
+            toolTip.SetToolTip(captionHost, ThemeRules.Caption(themeChoice));
+            captionHost.MouseEnter += delegate { toolTip.Show(ThemeRules.Caption(themeChoice), captionHost, 0, captionHost.Height + 2, 4000); };
+            captionHost.MouseLeave += delegate { toolTip.Hide(captionHost); };
             tray.ShowMain += delegate { ShowFromTray(); };
             tray.ExitRequested += delegate { BeginForcedExit(); };
             SystemEvents.SessionEnding += OnSessionEnding;
@@ -118,7 +122,15 @@ namespace KairiseiLauncher
             if (e.CloseReason == CloseReason.UserClosing && !allowExit)
             {
                 e.Cancel = true;
-                BeginUserClose();
+                if (!promptOpen)
+                {
+                    promptOpen = true;
+                    BeginInvoke(new Action(delegate
+                    {
+                        try { BeginUserClose(); }
+                        finally { promptOpen = false; }
+                    }));
+                }
                 return;
             }
             base.OnFormClosing(e);
@@ -266,10 +278,10 @@ namespace KairiseiLauncher
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 96F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 230F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 96F));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             Controls.Add(layout);
 
             var header = new Panel { Dock = DockStyle.Fill };
@@ -287,8 +299,6 @@ namespace KairiseiLauncher
             {
                 Text = "● 检测中",
                 AutoSize = true,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                Location = new Point(300, 8),
                 Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold)
             };
             header.Controls.Add(stateBadge);
@@ -319,8 +329,6 @@ namespace KairiseiLauncher
             clientThemeButton = new Button
             {
                 Size = new Size(16, 16),
-                Location = new Point(404, 4),
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
                 FlatStyle = FlatStyle.Flat,
                 TabStop = false
             };
@@ -329,29 +337,44 @@ namespace KairiseiLauncher
             clientThemeButton.Paint += delegate(object sender, PaintEventArgs args) { PaintThemeGlyph(args.Graphics, clientThemeButton.ClientRectangle); };
             header.Controls.Add(clientThemeButton);
             toolTip.SetToolTip(clientThemeButton, ThemeRules.Caption(themeChoice));
+            header.Resize += delegate { PlaceHeaderChrome(header); };
             layout.Controls.Add(header, 0, 0);
 
-            var connection = new Panel { Dock = DockStyle.Fill };
-            connection.Controls.Add(MakeLabel("使用场景", 0, 0));
+            var connection = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                Margin = new Padding(0, 0, 0, 8)
+            };
+            connection.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            connection.Controls.Add(MakeLabel("使用场景", 0, 0), 0, 0);
             mode = new ComboBox
             {
                 DropDownStyle = ComboBoxStyle.DropDownList,
-                Location = new Point(0, 22),
-                Width = 420,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0, 2, 0, 8)
             };
             mode.Items.AddRange(new object[] { "Android 模拟器", "局域网", "公网 IP / 域名" });
             mode.SelectedIndex = 0;
             mode.SelectedIndexChanged += delegate { ApplyMode(); };
-            connection.Controls.Add(mode);
-            var addressLabel = MakeLabel("服务器地址", 0, 58);
-            connection.Controls.Add(addressLabel);
+            connection.Controls.Add(mode, 0, 1);
+            var addressHead = new FlowLayoutPanel
+            {
+                FlowDirection = FlowDirection.LeftToRight,
+                AutoSize = true,
+                WrapContents = false,
+                Margin = new Padding(0, 0, 0, 2)
+            };
+            var addressLabel = MakeLabel("服务器地址", 0, 0);
+            addressLabel.Margin = new Padding(0, 2, 6, 0);
             questionMark = new Label
             {
                 Text = "?",
                 AutoSize = false,
                 Size = new Size(16, 16),
-                Location = new Point(78, 56),
+                Margin = new Padding(0, 2, 0, 0),
                 TextAlign = ContentAlignment.MiddleCenter
             };
             questionMark.Paint += delegate(object sender, PaintEventArgs args)
@@ -360,52 +383,79 @@ namespace KairiseiLauncher
                 using (var pen = new Pen(palette == null ? Color.FromArgb(11, 103, 159) : palette.Accent))
                     args.Graphics.DrawEllipse(pen, 0, 0, 15, 15);
             };
-            connection.Controls.Add(questionMark);
+            addressHead.Controls.Add(addressLabel);
+            addressHead.Controls.Add(questionMark);
+            connection.Controls.Add(addressHead, 0, 2);
+            var addressRow = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                ColumnCount = 2,
+                Margin = new Padding(0, 0, 0, 8)
+            };
+            addressRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            addressRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 128F));
             address = new ComboBox
             {
                 DropDownStyle = ComboBoxStyle.DropDown,
-                Location = new Point(0, 80),
-                Width = 280,
+                Dock = DockStyle.Fill,
+                Margin = new Padding(0, 0, 8, 0),
                 Text = "10.0.2.2"
             };
             address.TextChanged += delegate { UpdateClientConfig(); };
-            connection.Controls.Add(address);
-            var restoreDefault = MakeButton("恢复默认", 292, 78, 120, 28);
+            var restoreDefault = MakeButton("恢复默认", 0, 0, 120, 28);
+            restoreDefault.Dock = DockStyle.Fill;
+            restoreDefault.Margin = new Padding(0);
             restoreDefault.Click += delegate { RestoreDeploymentDefaults(); };
-            connection.Controls.Add(restoreDefault);
-            connection.Controls.Add(MakeLabel("主端口", 0, 116));
+            addressRow.Controls.Add(address, 0, 0);
+            addressRow.Controls.Add(restoreDefault, 1, 0);
+            connection.Controls.Add(addressRow, 0, 3);
+            connection.Controls.Add(MakeLabel("主端口", 0, 0), 0, 4);
             port = new NumericUpDown
             {
-                Location = new Point(0, 138),
-                Size = new Size(120, 28),
+                Width = 120,
+                Margin = new Padding(0, 2, 0, 4),
                 Minimum = 1,
                 Maximum = 65533,
                 Value = 26020
             };
             port.ValueChanged += delegate { UpdateClientConfig(); };
-            connection.Controls.Add(port);
+            connection.Controls.Add(port, 0, 5);
             endpoints = new Label
             {
                 Text = "游戏 26020 · 战斗 26021 · Admin 127.0.0.1:26022",
-                Location = new Point(0, 172),
-                AutoSize = true
+                AutoSize = true,
+                Margin = new Padding(0, 4, 0, 0)
             };
-            connection.Controls.Add(endpoints);
+            connection.Controls.Add(endpoints, 0, 6);
             layout.Controls.Add(connection, 0, 1);
 
-            var actions = new Panel { Dock = DockStyle.Fill };
-            powerButton = MakeButton("确认服务中", 0, 0, 420, 40);
-            powerButton.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            var actions = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                ColumnCount = 2,
+                Margin = new Padding(0, 0, 0, 8)
+            };
+            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            actions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            powerButton = MakeButton("确认服务中", 0, 0, 120, 40);
+            powerButton.Dock = DockStyle.Fill;
+            powerButton.Margin = new Padding(0, 0, 0, 8);
             powerButton.Enabled = false;
             powerButton.Click += async delegate { await PowerClicked(); };
-            actions.Controls.Add(powerButton);
-            adminButton = MakeButton("Admin面板", 0, 48, 200, 36);
-            var logsButton = MakeButton("查看日志", 212, 48, 208, 36);
-            logsButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            actions.SetColumnSpan(powerButton, 2);
+            actions.Controls.Add(powerButton, 0, 0);
+            adminButton = MakeButton("Admin面板", 0, 0, 120, 36);
+            adminButton.Dock = DockStyle.Fill;
+            adminButton.Margin = new Padding(0, 0, 6, 0);
+            var logsButton = MakeButton("查看日志", 0, 0, 120, 36);
+            logsButton.Dock = DockStyle.Fill;
+            logsButton.Margin = new Padding(6, 0, 0, 0);
             adminButton.Click += delegate { OpenAdmin(); };
             logsButton.Click += delegate { OpenLogs(); };
-            actions.Controls.Add(adminButton);
-            actions.Controls.Add(logsButton);
+            actions.Controls.Add(adminButton, 0, 1);
+            actions.Controls.Add(logsButton, 1, 1);
             layout.Controls.Add(actions, 0, 2);
 
             activity = new TextBox
@@ -420,8 +470,9 @@ namespace KairiseiLauncher
             layout.Controls.Add(new Label
             {
                 Text = "请完整解压后运行；首次启动会创建全新本地存档。",
-                Dock = DockStyle.Fill,
-                TextAlign = ContentAlignment.MiddleLeft
+                AutoSize = true,
+                Dock = DockStyle.Top,
+                Margin = new Padding(0, 8, 0, 0)
             }, 0, 4);
 
             ApplyMode();
@@ -537,12 +588,24 @@ namespace KairiseiLauncher
             {
                 captionHost.Hide();
                 clientThemeButton.Visible = true;
+                if (clientThemeButton.Parent != null) PlaceHeaderChrome(clientThemeButton.Parent);
                 return;
             }
             clientThemeButton.Visible = false;
+            if (clientThemeButton.Parent != null) PlaceHeaderChrome(clientThemeButton.Parent);
             int top = window.Top + caption.Top + Math.Max(0, (caption.Bottom - caption.Top - 16) / 2);
             captionHost.Bounds = new Rectangle(themeLeft, top, 16, 16);
             if (!captionHost.Visible) captionHost.Show(this);
+        }
+
+        private void PlaceHeaderChrome(Control header)
+        {
+            if (stateBadge == null || clientThemeButton == null || header == null) return;
+            var reserve = clientThemeButton.Visible ? clientThemeButton.Width + 6 : 0;
+            clientThemeButton.Left = Math.Max(0, header.ClientSize.Width - clientThemeButton.Width - 2);
+            clientThemeButton.Top = 2;
+            stateBadge.Left = Math.Max(0, header.ClientSize.Width - stateBadge.PreferredSize.Width - reserve);
+            stateBadge.Top = 4;
         }
 
         private void PopulateAddresses()
@@ -774,6 +837,7 @@ namespace KairiseiLauncher
             else if (running) stateBadge.Text = "● 正在运行";
             else stateBadge.Text = "● 未运行";
             stateBadge.ForeColor = running ? palette.Success : palette.Muted;
+            if (stateBadge.Parent != null) PlaceHeaderChrome(stateBadge.Parent);
             ApplyServiceButton();
             bool inputs = operationKind == OperationKind.None;
             mode.Enabled = inputs;
