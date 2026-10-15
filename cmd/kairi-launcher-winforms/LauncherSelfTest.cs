@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.IO;
 
 namespace KairiseiLauncher
@@ -13,6 +14,7 @@ namespace KairiseiLauncher
             ThemeTests(failures);
             ServiceButtonTests(failures);
             CloseTests(failures);
+            IconTests(failures);
             if (failures.Count == 0) return 0;
             try
             {
@@ -109,6 +111,41 @@ namespace KairiseiLauncher
             Expect(failures, ClosePolicy.Remembered(true, false) == CloseAction.Ask, "unchecked remember stays ask");
             Expect(failures, ClosePolicy.Remembered(true, true) == CloseAction.Tray, "remember tray");
             Expect(failures, ClosePolicy.Remembered(false, true) == CloseAction.Exit, "remember exit");
+        }
+
+        private static void IconTests(List<string> failures)
+        {
+            var light = ThemePalette.For(ResolvedTheme.Light);
+            var dark = ThemePalette.For(ResolvedTheme.Dark);
+            Expect(failures, light.Canvas.ToArgb() == unchecked((int)0xFFF4F9FC), "light canvas");
+            Expect(failures, dark.Canvas.ToArgb() == unchecked((int)0xFF1C2430), "dark canvas");
+            Expect(failures, light.Disabled.ToArgb() == unchecked((int)0xFFC5D0D8), "disabled gray");
+
+            using (var bitmap = new Bitmap(64, 64))
+            using (var graphics = Graphics.FromImage(bitmap))
+            {
+                graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
+                graphics.Clear(Color.Magenta);
+                ThemeIcon.Draw(graphics, new Rectangle(16, 16, 32, 32), ThemeChoice.Light, false);
+                Expect(failures, Near(bitmap.GetPixel(32, 32), Color.White), "sun center is white");
+                Expect(failures, bitmap.GetPixel(0, 0).ToArgb() == Color.Magenta.ToArgb(), "light title bar has no white halo");
+
+                graphics.Clear(Color.FromArgb(43, 53, 68));
+                ThemeIcon.Draw(graphics, new Rectangle(16, 16, 32, 32), ThemeChoice.System, false);
+                Expect(failures, Near(bitmap.GetPixel(24, 32), Color.Black), "follow crescent is black");
+                Expect(failures, Near(bitmap.GetPixel(40, 32), Color.White), "follow right side is white");
+
+                graphics.Clear(Color.FromArgb(43, 53, 68));
+                ThemeIcon.Draw(graphics, new Rectangle(16, 16, 32, 32), ThemeChoice.Dark, true);
+                Expect(failures, Near(bitmap.GetPixel(18, 32), Color.White) || Near(bitmap.GetPixel(17, 32), Color.White), "dark title bar halo is white");
+            }
+        }
+
+        private static bool Near(Color actual, Color expected)
+        {
+            return System.Math.Abs(actual.R - expected.R) < 12
+                && System.Math.Abs(actual.G - expected.G) < 12
+                && System.Math.Abs(actual.B - expected.B) < 12;
         }
     }
 }
