@@ -8,6 +8,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
@@ -58,10 +59,19 @@ namespace KairiseiLauncher
             if (args.Any(value => String.Equals(value, "--self-test", StringComparison.OrdinalIgnoreCase)))
                 return LauncherSelfTest.Run();
 
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new LauncherForm());
-            return 0;
+            Mutex mutex;
+            if (!SingleInstance.TryBecomePrimary(out mutex))
+            {
+                SingleInstance.SignalExisting();
+                return 0;
+            }
+            using (mutex)
+            {
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
+                Application.Run(new LauncherForm());
+                return 0;
+            }
         }
     }
 }

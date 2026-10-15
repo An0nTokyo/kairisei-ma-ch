@@ -30,6 +30,7 @@ namespace KairiseiLauncher
         private readonly Timer timer = new Timer();
         private readonly ToolTip toolTip = new ToolTip();
         private readonly ThemeCaptionHost captionHost;
+        private readonly LauncherTray tray = new LauncherTray();
         private ComboBox mode;
         private ComboBox address;
         private NumericUpDown port;
@@ -49,6 +50,8 @@ namespace KairiseiLauncher
         private OperationKind operationKind;
         private ServerState latestState;
         private string operationMessage = "";
+        private bool allowExit;
+        private bool shutdownStarted;
         private LauncherPreferences preferences;
         private ThemeChoice themeChoice;
         private ResolvedTheme resolved;
@@ -63,10 +66,22 @@ namespace KairiseiLauncher
             resolved = ThemeRules.Resolve(themeChoice, ReadAppsUseLightTheme());
             palette = ThemePalette.For(resolved);
             captionHost = new ThemeCaptionHost(CycleTheme, PaintThemeGlyph);
+            tray.ShowMain += delegate { ShowFromTray(); };
+            tray.ExitRequested += delegate { BeginForcedExit(); };
+            SystemEvents.SessionEnding += OnSessionEnding;
             BuildUI();
             ApplyPalette();
             LoadDeploymentDefaults();
-            HandleCreated += delegate { TitleBarTheme.Apply(Handle, resolved); PlaceThemeButton(); };
+            HandleCreated += delegate
+            {
+                TitleBarTheme.Apply(Handle, resolved);
+                PlaceThemeButton();
+                SingleInstance.Listen(delegate
+                {
+                    if (IsHandleCreated) BeginInvoke(new Action(ShowFromTray));
+                    else ShowFromTray();
+                });
+            };
             Shown += async delegate
             {
                 PlaceThemeButton();
@@ -77,9 +92,159 @@ namespace KairiseiLauncher
                 timer.Tick += async delegate { await RefreshStatus(false); };
                 timer.Start();
             };
-            FormClosing += delegate { timer.Stop(); if (captionHost != null) captionHost.Hide(); };
             Move += delegate { PlaceThemeButton(); };
             Resize += delegate { PlaceThemeButton(); };
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (e.CloseReason == CloseReason.TaskManagerClosing)
+            {
+                allowExit = true;
+                base.OnFormClosing(e);
+                return;
+            }
+            if (e.CloseReason == CloseReason.WindowsShutDown)
+            {
+                if (!shutdownStarted && latestState != null)
+                {
+                    shutdownStarted = true;
+                    Task.Run(() => controller.StopAsync()).GetAwaiter().GetResult();
+                }
+                allowExit = true;
+                base.OnFormClosing(e);
+                return;
+            }
+            if (e.CloseReason == CloseReason.UserClosing && !allowExit)
+            {
+                e.Cancel = true;
+                BeginUserClose();
+                return;
+            }
+            base.OnFormClosing(e);
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            SystemEvents.SessionEnding -= OnSessionEnding;
+            timer.Stop();
+            if (captionHost != null) captionHost.Hide();
+            tray.Dispose();
+            base.OnFormClosed(e);
+        }
+
+        private void OnSessionEnding(object sender, SessionEndingEventArgs args)
+        {
+            if (shutdownStarted) return;
+            shutdownStarted = true;
+            if (ClosePolicy.ForShutdown(latestState != null) == CloseOutcome.ExitAfterStop)
+                Task.Run(() => controller.StopAsync()).GetAwaiter().GetResult();
+        }
+
+        private void BeginUserClose()
+        {
+            var outcome = ClosePolicy.ForUserClose(preferences.CloseAction, latestState != null, operationKind != OperationKind.None);
+            if (outcome == CloseOutcome.ShowPrompt)
+            {
+                if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+                using (var prompt = new ClosePromptForm())
+                {
+                    if (prompt.ShowDialog(this) != DialogResult.OK) return;
+                    var remembered = ClosePolicy.Remembered(prompt.MinimizeToTray, prompt.Remember);
+                    if (remembered != CloseAction.Ask)
+                    {
+                        preferences.CloseAction = remembered;
+                        LauncherPreferencesStore.TrySave(LauncherPreferencesStore.DefaultPath, preferences);
+                    }
+                    outcome = prompt.MinimizeToTray
+                        ? CloseOutcome.HideToTray
+                        : ClosePolicy.ForUserClose(CloseAction.Exit, latestState != null, operationKind != OperationKind.None);
+                }
+            }
+            ApplyCloseOutcome(outcome);
+        }
+
+        private void BeginForcedExit()
+        {
+            ApplyCloseOutcome(ClosePolicy.ForUserClose(CloseAction.Exit, latestState != null, operationKind != OperationKind.None));
+        }
+
+        private void ApplyCloseOutcome(CloseOutcome outcome)
+        {
+            if (outcome == CloseOutcome.HideToTray) HideToTray();
+            else if (outcome == CloseOutcome.ExitLauncher)
+            {
+                allowExit = true;
+                Close();
+            }
+            else if (outcome == CloseOutcome.ExitAfterStop) ExitAfterStop();
+            else if (outcome == CloseOutcome.StayBecauseBusy)
+            {
+                ShowFromTray();
+                ShowFailure("另一项服务操作正在执行，请稍候。");
+            }
+        }
+
+        private async void ExitAfterStop()
+        {
+            if (operationKind != OperationKind.None)
+            {
+                ShowFromTray();
+                ShowFailure("另一项服务操作正在执行，请稍候。");
+                return;
+            }
+            operationKind = OperationKind.Stop;
+            busy = true;
+            ApplyState(latestState, false);
+            try
+            {
+                var result = await controller.StopAsync();
+                if (IsDisposed || Disposing) return;
+                if (result.exit_code == 0)
+                {
+                    allowExit = true;
+                    Close();
+                    return;
+                }
+                var text = String.IsNullOrWhiteSpace(result.output) ? "操作失败，退出码 " + result.exit_code : result.output.Trim();
+                ShowFromTray();
+                ShowFailure(text + "\r\n日志：" + result.diagnostic_path);
+            }
+            catch (Exception ex)
+            {
+                if (!IsDisposed && !Disposing)
+                {
+                    ShowFromTray();
+                    ShowFailure(ex.Message);
+                }
+            }
+            finally
+            {
+                if (!allowExit)
+                {
+                    busy = false;
+                    operationKind = OperationKind.None;
+                }
+            }
+            if (!allowExit && !IsDisposed && !Disposing) await RefreshStatus(false);
+        }
+
+        private void HideToTray()
+        {
+            if (captionHost != null) captionHost.Hide();
+            Hide();
+            ShowInTaskbar = false;
+            tray.Show(Icon != null ? Icon : SystemIcons.Application);
+        }
+
+        private void ShowFromTray()
+        {
+            ShowInTaskbar = true;
+            Show();
+            if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+            Activate();
+            tray.Hide();
+            PlaceThemeButton();
         }
 
         private void BuildUI()
