@@ -11,6 +11,7 @@ namespace KairiseiLauncher
             var failures = new List<string>();
             PreferenceTests(failures);
             ThemeTests(failures);
+            ServiceButtonTests(failures);
             if (failures.Count == 0) return 0;
             try
             {
@@ -76,6 +77,22 @@ namespace KairiseiLauncher
             Expect(failures, ThemeRules.Resolve(ThemeChoice.System, 0) == ResolvedTheme.Dark, "registry 0 is dark");
             Expect(failures, ThemeRules.Resolve(ThemeChoice.Light, 0) == ResolvedTheme.Light, "fixed light ignores registry");
             Expect(failures, ThemeRules.Resolve(ThemeChoice.Dark, 1) == ResolvedTheme.Dark, "fixed dark ignores registry");
+        }
+
+        private static void ServiceButtonTests(List<string> failures)
+        {
+            ExpectButton(failures, ServiceButton.Resolve(false, false, false, false, false), "确认服务中", false, "first check");
+            ExpectButton(failures, ServiceButton.Resolve(true, false, false, false, false), "启动服务", true, "idle");
+            ExpectButton(failures, ServiceButton.Resolve(true, false, false, true, false), "确认服务中", false, "start before process");
+            ExpectButton(failures, ServiceButton.Resolve(true, true, false, false, false), "确认服务中", false, "process not healthy");
+            ExpectButton(failures, ServiceButton.Resolve(true, true, true, false, false), "停止服务", true, "healthy");
+            ExpectButton(failures, ServiceButton.Resolve(true, true, true, false, true), "停止服务", false, "stopping while process exists");
+            ExpectButton(failures, ServiceButton.Resolve(true, false, false, false, true), "启动服务", true, "process already gone");
+        }
+
+        private static void ExpectButton(List<string> failures, ServiceButtonState state, string text, bool enabled, string message)
+        {
+            Expect(failures, state.Text == text && state.Enabled == enabled, message);
         }
     }
 }
