@@ -36,6 +36,17 @@ func WriteMasterFiles(dir string, cards, growth []byte) error {
 	return os.WriteFile(filepath.Join(masterDir, "growth.bin"), growth, 0o600)
 }
 
+func DefenseFilePath(dir string) string {
+	return filepath.Join(dir, "defense-decks.json")
+}
+
+func WriteDefenseDecks(dir string, body []byte) error {
+	if len(body) == 0 {
+		return nil
+	}
+	return os.WriteFile(DefenseFilePath(dir), body, 0o600)
+}
+
 func WriteExtraMasterFiles(dir string, files map[string][]byte) error {
 	if len(files) == 0 {
 		return nil

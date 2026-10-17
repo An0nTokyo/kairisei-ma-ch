@@ -34,6 +34,7 @@ func TestBorrowAndReturn(t *testing.T) {
 		cardsPath:  cardsPath,
 		growthPath: growthPath,
 		extra:      map[string][]byte{"explore.bin": []byte("explore-v1")},
+		defense:    []byte(`[{"user":{"user_id":1000002,"name":"frozen-defense-marker"}}]`),
 	})
 	remote := httptest.NewServer(handler)
 	t.Cleanup(remote.Close)
@@ -79,6 +80,14 @@ func TestBorrowAndReturn(t *testing.T) {
 	explore, err := os.ReadFile(filepath.Join(phoneDir, "masters", "explore.bin"))
 	if err != nil || string(explore) != "explore-v1" {
 		t.Fatalf("explore master = %q %v", explore, err)
+	}
+	defense, err := os.ReadFile(accountsync.DefenseFilePath(phoneDir))
+	if err != nil || !strings.Contains(string(defense), "frozen-defense-marker") {
+		t.Fatalf("defense decks = %q %v", defense, err)
+	}
+	transferred, err := phoneStore.ExportTransferJSON(userID)
+	if err != nil || strings.Contains(string(transferred), "frozen-defense-marker") {
+		t.Fatal("defense decks were stored in the account transfer")
 	}
 	if _, found, err := phoneStore.FindLogin("00000000-0000-0000-0000-000000000099"); err != nil || !found {
 		t.Fatalf("phone login after borrow = %v found %v", err, found)
@@ -191,6 +200,7 @@ type serverDB struct {
 	cardsPath  string
 	growthPath string
 	extra      map[string][]byte
+	defense    []byte
 }
 
 func (db serverDB) Holder(userID int) (accountsync.HolderView, error) {
@@ -229,6 +239,8 @@ func (db serverDB) MasterFiles() ([]byte, []byte, error) {
 
 func (db serverDB) ExtraMasters() (map[string][]byte, error) { return db.extra, nil }
 
+func (db serverDB) DefenseDecks(int) ([]byte, error) { return db.defense, nil }
+
 type phoneDB struct {
 	store *localcn.Store
 	dir   string
@@ -266,6 +278,10 @@ func (phone phoneDB) WriteMasters(cards, growth []byte) error {
 
 func (phone phoneDB) WriteExtraMasters(files map[string][]byte) error {
 	return accountsync.WriteExtraMasterFiles(phone.dir, files)
+}
+
+func (phone phoneDB) WriteDefenseDecks(body []byte) error {
+	return accountsync.WriteDefenseDecks(phone.dir, body)
 }
 
 func TestExtraMasterNameIsRejected(t *testing.T) {

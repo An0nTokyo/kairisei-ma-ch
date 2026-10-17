@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"kairisei.local/server/accountsync"
 	"kairisei.local/server/internal/cnbootstrap"
 	"kairisei.local/server/internal/multiplayer"
 )
@@ -28,6 +29,7 @@ type PlayOptions struct {
 	PVP               string
 	BattleHost        string
 	BattlePort        int
+	DefenseDecks      []byte
 }
 
 type Play struct {
@@ -43,6 +45,13 @@ func OpenPlayFromDir(store *Store, dataDir, deviceID, baseURL, battleHost string
 			return ""
 		}
 		return path
+	}
+	var defense []byte
+	defensePath := accountsync.DefenseFilePath(dataDir)
+	if body, err := os.ReadFile(defensePath); err == nil {
+		defense = body
+	} else if !os.IsNotExist(err) {
+		return nil, err
 	}
 	return OpenPlay(store, PlayOptions{
 		DeviceID:          deviceID,
@@ -61,6 +70,7 @@ func OpenPlayFromDir(store *Store, dataDir, deviceID, baseURL, battleHost string
 		PVP:               optional("pvp.bin"),
 		BattleHost:        battleHost,
 		BattlePort:        battlePort,
+		DefenseDecks:      defense,
 	})
 }
 
@@ -83,7 +93,8 @@ func OpenPlay(store *Store, options PlayOptions) (*Play, error) {
 			PlayerProgression: options.PlayerProgression,
 			LoginBonus:        options.LoginBonus,
 		},
-		BattleSV: multiplayer.Endpoint{Host: options.BattleHost, Port: uint16(options.BattlePort)},
+		BattleSV:     multiplayer.Endpoint{Host: options.BattleHost, Port: uint16(options.BattlePort)},
+		DefenseDecks: options.DefenseDecks,
 	})
 	if err != nil {
 		return nil, err

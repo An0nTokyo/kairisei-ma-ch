@@ -56,3 +56,7 @@ func (phone phoneStore) WriteMasters(cards, growth []byte) error {
 func (phone phoneStore) WriteExtraMasters(files map[string][]byte) error {
 	return accountsync.WriteExtraMasterFiles(phone.dir, files)
 }
+
+func (phone phoneStore) WriteDefenseDecks(body []byte) error {
+	return accountsync.WriteDefenseDecks(phone.dir, body)
+}

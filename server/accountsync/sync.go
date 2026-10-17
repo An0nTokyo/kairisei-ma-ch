@@ -36,6 +36,7 @@ type DB interface {
 	DeliverHeldMail(userID int) error
 	MasterFiles() (cards, growth []byte, err error)
 	ExtraMasters() (map[string][]byte, error)
+	DefenseDecks(userID int) ([]byte, error)
 }
 
 type Phone interface {
@@ -47,6 +48,7 @@ type Phone interface {
 	ReadMasters() (cards, growth []byte, ok bool, err error)
 	WriteMasters(cards, growth []byte) error
 	WriteExtraMasters(files map[string][]byte) error
+	WriteDefenseDecks(body []byte) error
 }
 
 type ChoiceRequiredError struct {
@@ -68,6 +70,7 @@ type borrowResponse struct {
 	Revision     int               `json:"revision"`
 	MasterDigest string            `json:"master_digest"`
 	Masters      map[string][]byte `json:"masters,omitempty"`
+	DefenseDecks []byte            `json:"defense_decks,omitempty"`
 }
 
 func (service Service) PrepareBorrow(userID int, deviceID string) (borrowResponse, error) {
@@ -93,6 +96,10 @@ func (service Service) PrepareBorrow(userID int, deviceID string) (borrowRespons
 		if _, ok := extraMasterNames[name]; !ok {
 			return borrowResponse{}, errors.New("account master name is invalid")
 		}
+	}
+	defense, err := service.DB.DefenseDecks(userID)
+	if err != nil {
+		return borrowResponse{}, err
 	}
 	digest := accountstore.MasterDigest(cards, growth)
 	revision, err := service.DB.Revision(userID)
@@ -125,6 +132,7 @@ func (service Service) PrepareBorrow(userID int, deviceID string) (borrowRespons
 		Revision:     revision,
 		MasterDigest: digest,
 		Masters:      extra,
+		DefenseDecks: defense,
 	}, nil
 }
 
@@ -311,6 +319,10 @@ func Borrow(baseURL, token, deviceID string, userID int, phone Phone) error {
 		}
 	}
 	if err := phone.WriteExtraMasters(result.Masters); err != nil {
+		_ = abort(baseURL, token, userID)
+		return err
+	}
+	if err := phone.WriteDefenseDecks(result.DefenseDecks); err != nil {
 		_ = abort(baseURL, token, userID)
 		return err
 	}

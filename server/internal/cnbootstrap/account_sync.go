@@ -120,3 +120,14 @@ func (db accountSyncDB) ExtraMasters() (map[string][]byte, error) {
 	}
 	return files, nil
 }
+
+func (db accountSyncDB) DefenseDecks(userID int) ([]byte, error) {
+	states, err := db.accounts.ListPVPOpponents(userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(states) == 0 {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(states)
+}

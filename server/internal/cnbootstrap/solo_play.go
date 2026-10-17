@@ -19,11 +19,12 @@ import (
 )
 
 type SoloPlayConfig struct {
-	DeviceID string
-	BaseURL  string
-	Logger   *slog.Logger
-	Masters  MastersConfig
-	BattleSV multiplayer.Endpoint
+	DeviceID     string
+	BaseURL      string
+	Logger       *slog.Logger
+	Masters      MastersConfig
+	BattleSV     multiplayer.Endpoint
+	DefenseDecks []byte
 }
 
 func NewSoloPlay(accounts *accountstore.Accounts, config SoloPlayConfig) (http.Handler, []string, error) {
@@ -100,6 +101,10 @@ func NewSoloPlay(accounts *accountstore.Accounts, config SoloPlayConfig) (http.H
 	if err != nil {
 		return nil, nil, err
 	}
+	opponents, err := frozenPVPOpponents(config.DefenseDecks)
+	if err != nil {
+		return nil, nil, err
+	}
 	business := accounthttp.New(accounthttp.Config{
 		IdleLimit:     cacheLimit,
 		Prepare:       operations.PrepareBusiness,
@@ -115,7 +120,7 @@ func NewSoloPlay(accounts *accountstore.Accounts, config SoloPlayConfig) (http.H
 				Logger:              config.Logger,
 				PersistState:        func(next gamestate.State) error { return accounts.PersistState(userID, next) },
 				PVP:                 pvpConfig,
-				PVPAccounts:         accounts,
+				PVPAccounts:         opponents.repository(accounts),
 				FriendPointAccounts: accounts,
 				BattleHistory:       accounts,
 				BattleSV:            config.BattleSV,
@@ -127,7 +132,48 @@ func NewSoloPlay(accounts *accountstore.Accounts, config SoloPlayConfig) (http.H
 	router := chi.NewRouter()
 	router.Use(authenticateCNSessions(accounts))
 	router.Use(requirePhoneHolder(accounts, config.DeviceID))
-	return router, app.registerSoloRoutes(router), nil
+	paths := app.registerSoloRoutes(router)
+	if opponents.ready {
+		paths = append(paths, app.registerDefenseRoutes(router)...)
+	}
+	return router, paths, nil
+}
+
+type frozenOpponentSource struct {
+	ready  bool
+	states []gamestate.State
+}
+
+func frozenPVPOpponents(raw []byte) (frozenOpponentSource, error) {
+	if len(raw) == 0 {
+		return frozenOpponentSource{}, nil
+	}
+	var states []gamestate.State
+	if err := json.Unmarshal(raw, &states); err != nil {
+		return frozenOpponentSource{}, fmt.Errorf("CN solo defense decks: %w", err)
+	}
+	return frozenOpponentSource{ready: true, states: states}, nil
+}
+
+func (source frozenOpponentSource) repository(fallback interface {
+	ListPVPOpponents(userID int) ([]gamestate.State, error)
+}) interface {
+	ListPVPOpponents(userID int) ([]gamestate.State, error)
+} {
+	if !source.ready {
+		return fallback
+	}
+	return source
+}
+
+func (source frozenOpponentSource) ListPVPOpponents(userID int) ([]gamestate.State, error) {
+	result := make([]gamestate.State, 0, len(source.states))
+	for _, state := range source.states {
+		if state.User.UserID != userID {
+			result = append(result, state)
+		}
+	}
+	return result, nil
 }
 
 func avatarBundles(path string) (map[string]struct{}, error) {
