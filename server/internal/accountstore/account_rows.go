@@ -12,6 +12,9 @@ import (
 	"kairisei.local/server/internal/gamestate"
 )
 
+// accountRowWriteHook lets a test abort row writes before they commit.
+var accountRowWriteHook func() error
+
 type storedRow struct {
 	id     int64
 	values []any
@@ -149,6 +152,11 @@ const stackRowColumns = "num,hp,attack,magic,mind,add_exp,base_add_price,materia
 const presentRowColumns = "history,issued_at_unix,add_elapsed_sec,limit_time,state,reason,title,comment,url,auto_fusion_used,auto_loveup_used,admin_key,rewards_json"
 
 func writeAccountRows(tx *sql.Tx, state gamestate.State) error {
+	if accountRowWriteHook != nil {
+		if err := accountRowWriteHook(); err != nil {
+			return err
+		}
+	}
 	u := state.User
 	if _, err := tx.Exec(`INSERT INTO cn_account_balance(user_id,gold,coin,coin_free,friend_point,pvp_point)
  VALUES(?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET gold=excluded.gold,coin=excluded.coin,
