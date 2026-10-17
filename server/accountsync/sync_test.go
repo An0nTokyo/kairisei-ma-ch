@@ -201,6 +201,8 @@ type serverDB struct {
 	growthPath string
 	extra      map[string][]byte
 	defense    []byte
+	roster     []accountsync.AccountBrief
+	writes     *int
 }
 
 func (db serverDB) Holder(userID int) (accountsync.HolderView, error) {
@@ -211,7 +213,14 @@ func (db serverDB) Holder(userID int) (accountsync.HolderView, error) {
 	return holderView(holder), nil
 }
 
+func (db serverDB) AccountRoster(string) ([]accountsync.AccountBrief, error) {
+	return db.roster, nil
+}
+
 func (db serverDB) SaveHolder(userID int, holderID string, checkoutRevision int, masterDigest string, frozen bool) error {
+	if db.writes != nil {
+		*db.writes++
+	}
 	return db.store.SaveHolder(userID, holderID, checkoutRevision, masterDigest, frozen)
 }
 
@@ -219,7 +228,12 @@ func (db serverDB) Revision(userID int) (int, error) { return db.store.SnapshotR
 
 func (db serverDB) Export(userID int) ([]byte, error) { return db.store.ExportTransferJSON(userID) }
 
-func (db serverDB) Import(raw []byte) error { return db.store.ImportTransferJSON(raw) }
+func (db serverDB) Import(raw []byte) error {
+	if db.writes != nil {
+		*db.writes++
+	}
+	return db.store.ImportTransferJSON(raw)
+}
 
 func (db serverDB) LoginUUID(userID int) (string, error) { return db.store.LoginUUID(userID) }
 
@@ -288,6 +302,42 @@ func TestExtraMasterNameIsRejected(t *testing.T) {
 	err := accountsync.WriteExtraMasterFiles(t.TempDir(), map[string][]byte{"../cards.bin": []byte("x")})
 	if err == nil || !strings.Contains(err.Error(), "invalid") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestAccountRosterRoute(t *testing.T) {
+	writes := 0
+	db := serverDB{
+		roster: []accountsync.AccountBrief{{UserID: 1000001, Name: "秋", State: "server"}},
+		writes: &writes,
+	}
+	handler := accountsync.Handler("secret", db)
+	post := func(token, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/local/sync/accounts", strings.NewReader(body))
+		if token != "" {
+			request.Header.Set("X-Account-Sync-Token", token)
+		}
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		return recorder
+	}
+	missing := post("secret", `{}`)
+	if missing.Code != http.StatusBadRequest || !strings.Contains(missing.Body.String(), "account sync body is invalid") {
+		t.Fatalf("empty device = %d %s", missing.Code, missing.Body.String())
+	}
+	for _, token := range []string{"", "nope"} {
+		got := post(token, `{"device_id":"device-a"}`)
+		if got.Code != http.StatusNotFound {
+			t.Fatalf("token %q status = %d", token, got.Code)
+		}
+	}
+	ok := post("secret", `{"device_id":"device-a"}`)
+	if ok.Code != http.StatusOK || !strings.Contains(ok.Body.String(), `"user_id":1000001`) || !strings.Contains(ok.Body.String(), `"state":"server"`) {
+		t.Fatalf("roster = %d %s", ok.Code, ok.Body.String())
+	}
+	if writes != 0 {
+		t.Fatalf("writes = %d", writes)
 	}
 }
 

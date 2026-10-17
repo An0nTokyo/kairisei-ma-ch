@@ -121,6 +121,18 @@ func (db accountSyncDB) ExtraMasters() (map[string][]byte, error) {
 	return files, nil
 }
 
+func (db accountSyncDB) AccountRoster(deviceID string) ([]accountsync.AccountBrief, error) {
+	rows, err := db.accounts.SyncRoster(deviceID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]accountsync.AccountBrief, len(rows))
+	for i, row := range rows {
+		out[i] = accountsync.AccountBrief{UserID: row.UserID, Name: row.Name, State: row.State}
+	}
+	return out, nil
+}
+
 func (db accountSyncDB) DefenseDecks(userID int) ([]byte, error) {
 	states, err := db.accounts.ListPVPOpponents(userID)
 	if err != nil {

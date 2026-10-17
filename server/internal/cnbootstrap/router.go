@@ -124,6 +124,7 @@ func (app *application) router() chi.Router {
 			"/local/sync/borrow/abort",
 			"/local/sync/borrow/commit",
 			"/local/sync/return",
+			"/local/sync/accounts",
 		} {
 			router.Post(path, http.HandlerFunc(syncHandler.ServeHTTP))
 		}

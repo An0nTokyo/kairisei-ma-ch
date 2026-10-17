@@ -26,8 +26,15 @@ type HolderView struct {
 	Frozen           bool
 }
 
+type AccountBrief struct {
+	UserID int    `json:"user_id"`
+	Name   string `json:"name"`
+	State  string `json:"state"`
+}
+
 type DB interface {
 	Holder(userID int) (HolderView, error)
+	AccountRoster(deviceID string) ([]AccountBrief, error)
 	SaveHolder(userID int, holderID string, checkoutRevision int, masterDigest string, frozen bool) error
 	Revision(userID int) (int, error)
 	Export(userID int) ([]byte, error)
@@ -285,6 +292,23 @@ func Handler(token string, db DB) http.Handler {
 				return
 			}
 			writeJSON(writer, http.StatusOK, map[string]bool{"ok": true})
+		case "/local/sync/accounts":
+			var payload struct {
+				DeviceID string `json:"device_id"`
+			}
+			if err := json.Unmarshal(body, &payload); err != nil || payload.DeviceID == "" {
+				writeError(writer, http.StatusBadRequest, "account sync body is invalid")
+				return
+			}
+			accounts, err := service.DB.AccountRoster(payload.DeviceID)
+			if err != nil {
+				writeError(writer, http.StatusBadRequest, err.Error())
+				return
+			}
+			if accounts == nil {
+				accounts = []AccountBrief{}
+			}
+			writeJSON(writer, http.StatusOK, map[string]any{"accounts": accounts})
 		default:
 			http.NotFound(writer, request)
 		}
@@ -486,4 +510,19 @@ func writeJSON(writer http.ResponseWriter, status int, body any) {
 
 func writeError(writer http.ResponseWriter, status int, message string) {
 	writeJSON(writer, status, map[string]string{"error": message})
+}
+
+func ListAccounts(baseURL, token, deviceID string) ([]AccountBrief, error) {
+	var result struct {
+		Accounts []AccountBrief `json:"accounts"`
+	}
+	if err := post(baseURL, token, "/local/sync/accounts", map[string]any{
+		"device_id": deviceID,
+	}, &result, nil); err != nil {
+		return nil, err
+	}
+	if result.Accounts == nil {
+		result.Accounts = []AccountBrief{}
+	}
+	return result.Accounts, nil
 }
