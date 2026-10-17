@@ -476,33 +476,8 @@ func (accounts *Accounts) resolveLoginTransaction(ctx context.Context, transacti
 		); err != nil {
 			return accountIdentity{}, fmt.Errorf("create CN local account: %w", err)
 		}
-		if identity.UserID != PrimaryUserID {
-			if err := accounts.insertSeedSnapshot(ctx, transaction, identity.UserID, now); err != nil {
-				return accountIdentity{}, err
-			}
-		} else {
-			var revision int
-			var updatedUTC string
-			var content []byte
-			var expectedDigest string
-			if err := transaction.QueryRowContext(
-				ctx,
-				`SELECT revision, updated_utc, payload_json, payload_sha256
-				 FROM cn_save_snapshot WHERE singleton = 1`,
-			).Scan(&revision, &updatedUTC, &content, &expectedDigest); err != nil {
-				return accountIdentity{}, fmt.Errorf("read primary CN account snapshot: %w", err)
-			}
-			digest := sha256.Sum256(content)
-			if hex.EncodeToString(digest[:]) != expectedDigest {
-				return accountIdentity{}, errors.New("primary CN account snapshot digest mismatch")
-			}
-			state, err := accounts.storage.decodeAccount(transaction, content)
-			if err != nil {
-				return accountIdentity{}, err
-			}
-			if err := upsertAccountProjection(transaction, identity.UserID, revision, updatedUTC, state); err != nil {
-				return accountIdentity{}, err
-			}
+		if err := accounts.insertSeedSnapshot(ctx, transaction, identity.UserID, now); err != nil {
+			return accountIdentity{}, err
 		}
 	}
 	return identity, nil
@@ -543,30 +518,7 @@ func (accounts *Accounts) adoptUnboundPrimary(ctx context.Context, transaction *
 }
 
 func (accounts *Accounts) insertSeedSnapshot(ctx context.Context, transaction *sql.Tx, userID int, now string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	state, err := LoadSaveState(accounts.storage.seedPath)
-	if err != nil {
-		return fmt.Errorf("load CN account seed: %w", err)
-	}
-	if err := InitializeOnboardingSnapshot(&state, userID); err != nil {
-		return err
-	}
-	content, err := EncodeAccountMetadata(state)
-	if err != nil {
-		return err
-	}
-	if err := writeAccountRows(transaction, state); err != nil {
-		return err
-	}
-	digest := sha256.Sum256(content)
-	if _, err := transaction.ExecContext(ctx,
-		`INSERT INTO cn_account_snapshot (user_id, schema_version, revision, updated_utc, payload_json, payload_sha256)
-         VALUES (?, ?, 1, ?, ?, ?)`, userID, saveSnapshotSchemaVersion, now, content, hex.EncodeToString(digest[:])); err != nil {
-		return fmt.Errorf("create CN account snapshot: %w", err)
-	}
-	return upsertAccountProjection(transaction, userID, 1, now, state)
+	return accounts.storage.seedAccountSnapshot(ctx, transaction, userID, now)
 }
 
 func (accounts *Accounts) LoadState(userID int) (gamestate.State, error) {

@@ -591,3 +591,27 @@ func TestAccountSnapshotExcludesDerivedFriendProfiles(t *testing.T) {
 		t.Fatalf("persisted friend rows = %#v, want non-nil empty list", persisted.Friends.Users)
 	}
 }
+
+func TestFirstAccountUsesAccountSnapshot(t *testing.T) {
+	accounts := testfixture.NewFriendCapacityTestAccounts(t)
+	database, err := accounts.Database().Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshots int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM cn_save_snapshot`).Scan(&snapshots); err != nil || snapshots != 0 {
+		t.Fatalf("singleton rows = %d %v", snapshots, err)
+	}
+	first, err := accounts.ResolveLogin("00000000-0000-4000-8000-00000000f001")
+	if err != nil || first.UserID != accountstore.PrimaryUserID {
+		t.Fatalf("first user = %+v %v", first, err)
+	}
+	var rows int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM cn_account_snapshot WHERE user_id = ?`, accountstore.PrimaryUserID).Scan(&rows); err != nil || rows != 1 {
+		t.Fatalf("primary snapshot rows = %d %v", rows, err)
+	}
+	second, err := accounts.ResolveLogin("00000000-0000-4000-8000-00000000f002")
+	if err != nil || second.UserID != accountstore.PrimaryUserID+1 {
+		t.Fatalf("second user = %+v %v", second, err)
+	}
+}

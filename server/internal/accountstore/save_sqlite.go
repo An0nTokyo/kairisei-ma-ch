@@ -89,67 +89,137 @@ func (storage *Database) LoadOrImport() (gamestate.State, error) {
 	if err != nil {
 		return gamestate.State{}, err
 	}
-
-	transaction, err := database.BeginTx(context.Background(), &sql.TxOptions{})
-	if err != nil {
-		return gamestate.State{}, fmt.Errorf("begin CN save database initialization: %w", err)
+	var singleton int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM cn_save_snapshot WHERE singleton = 1`).Scan(&singleton); err != nil {
+		return gamestate.State{}, fmt.Errorf("read primary CN snapshot: %w", err)
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = transaction.Rollback()
+	if singleton == 1 {
+		if err := storage.ensureUnboundPrimaryLogin(); err != nil {
+			return gamestate.State{}, err
 		}
-	}()
+		if err := storage.MigratePrimarySnapshot(); err != nil {
+			return gamestate.State{}, err
+		}
+	}
+	var snapshot int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM cn_account_snapshot WHERE user_id = ?`, PrimaryUserID).Scan(&snapshot); err != nil {
+		return gamestate.State{}, err
+	}
+	if snapshot == 0 {
+		if err := storage.seedPrimaryAccount(); err != nil {
+			return gamestate.State{}, err
+		}
+	}
+	return storage.readPrimaryAccount()
+}
 
+func (storage *Database) ensureUnboundPrimaryLogin() error {
+	database, err := storage.Open()
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = database.Exec(
+		`INSERT INTO cn_local_account
+		 (user_id, login_uuid, session_key, created_utc, last_login_utc)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(user_id) DO NOTHING`,
+		PrimaryUserID,
+		unboundPrimaryLoginUUID,
+		unboundPrimarySessionKey,
+		now,
+		now,
+	)
+	if err != nil {
+		return fmt.Errorf("create primary CN login row: %w", err)
+	}
+	return nil
+}
+
+func (storage *Database) seedPrimaryAccount() error {
+	database, err := storage.Open()
+	if err != nil {
+		return err
+	}
+	transaction, err := database.BeginTx(context.Background(), nil)
+	if err != nil {
+		return fmt.Errorf("begin primary CN account seed: %w", err)
+	}
+	defer transaction.Rollback()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := transaction.Exec(
+		`INSERT INTO cn_local_account
+		 (user_id, login_uuid, session_key, created_utc, last_login_utc)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(user_id) DO NOTHING`,
+		PrimaryUserID,
+		unboundPrimaryLoginUUID,
+		unboundPrimarySessionKey,
+		now,
+		now,
+	); err != nil {
+		return fmt.Errorf("create primary CN login row: %w", err)
+	}
+	if err := storage.seedAccountSnapshot(context.Background(), transaction, PrimaryUserID, now); err != nil {
+		return err
+	}
+	if err := transaction.Commit(); err != nil {
+		return fmt.Errorf("commit primary CN account seed: %w", err)
+	}
+	if storage.logger != nil {
+		storage.logger.Info("initialized CN account in SQLite", "database_path", storage.databasePath)
+	}
+	return nil
+}
+
+func (storage *Database) seedAccountSnapshot(ctx context.Context, transaction *sql.Tx, userID int, now string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	state, err := LoadSaveState(storage.seedPath)
+	if err != nil {
+		return fmt.Errorf("load CN account seed: %w", err)
+	}
+	if err := InitializeOnboardingSnapshot(&state, userID); err != nil {
+		return err
+	}
+	content, err := EncodeAccountMetadata(state)
+	if err != nil {
+		return err
+	}
+	if err := writeAccountRows(transaction, state); err != nil {
+		return err
+	}
+	digest := sha256.Sum256(content)
+	if _, err := transaction.ExecContext(ctx,
+		`INSERT INTO cn_account_snapshot (user_id, schema_version, revision, updated_utc, payload_json, payload_sha256)
+         VALUES (?, ?, 1, ?, ?, ?)`, userID, saveSnapshotSchemaVersion, now, content, hex.EncodeToString(digest[:])); err != nil {
+		return fmt.Errorf("create CN account snapshot: %w", err)
+	}
+	return upsertAccountProjection(transaction, userID, 1, now, state)
+}
+
+func (storage *Database) readPrimaryAccount() (gamestate.State, error) {
+	database, err := storage.Open()
+	if err != nil {
+		return gamestate.State{}, err
+	}
+	transaction, err := database.BeginTx(context.Background(), nil)
+	if err != nil {
+		return gamestate.State{}, err
+	}
+	defer transaction.Rollback()
 	var schemaVersion int
 	var content []byte
 	var expectedDigest string
-	err = transaction.QueryRowContext(
-		context.Background(),
-		`SELECT schema_version, payload_json, payload_sha256
-		 FROM cn_save_snapshot WHERE singleton = 1`,
-	).Scan(&schemaVersion, &content, &expectedDigest)
-	imported := false
-	if errors.Is(err, sql.ErrNoRows) {
-		state, loadErr := LoadSaveState(storage.seedPath)
-		if loadErr == nil {
-			loadErr = InitializeOnboardingSnapshot(&state, PrimaryUserID)
-		}
-		if loadErr != nil {
-			return gamestate.State{}, fmt.Errorf("load CN JSON seed: %w", loadErr)
-		}
-		content, loadErr = EncodeAccountMetadata(state)
-		if loadErr != nil {
-			return gamestate.State{}, loadErr
-		}
-		if err := writeAccountRows(transaction, state); err != nil {
-			return gamestate.State{}, err
-		}
-		digest := sha256.Sum256(content)
-		expectedDigest = hex.EncodeToString(digest[:])
-		_, err = transaction.ExecContext(
-			context.Background(),
-			`INSERT INTO cn_save_snapshot
-			 (singleton, schema_version, revision, updated_utc, payload_json, payload_sha256)
-			 VALUES (1, ?, 1, ?, ?, ?)`,
-			saveSnapshotSchemaVersion,
-			time.Now().UTC().Format(time.RFC3339Nano),
-			content,
-			expectedDigest,
-		)
-		if err != nil {
-			return gamestate.State{}, fmt.Errorf("import CN JSON seed into SQLite: %w", err)
-		}
-		schemaVersion = saveSnapshotSchemaVersion
-		imported = true
-	} else if err != nil {
-		return gamestate.State{}, fmt.Errorf("read CN SQLite snapshot: %w", err)
+	if err := transaction.QueryRow(
+		`SELECT schema_version, payload_json, payload_sha256 FROM cn_account_snapshot WHERE user_id = ?`,
+		PrimaryUserID,
+	).Scan(&schemaVersion, &content, &expectedDigest); err != nil {
+		return gamestate.State{}, fmt.Errorf("read CN account snapshot: %w", err)
 	}
 	if schemaVersion != saveSnapshotSchemaVersion {
 		return gamestate.State{}, fmt.Errorf("CN SQLite snapshot schema_version is %d, want %d", schemaVersion, saveSnapshotSchemaVersion)
-	}
-	if len(content) == 0 || len(content) > maxAccountSnapshotBytes {
-		return gamestate.State{}, errors.New("CN SQLite snapshot is empty or exceeds the size limit")
 	}
 	digest := sha256.Sum256(content)
 	if hex.EncodeToString(digest[:]) != expectedDigest {
@@ -160,28 +230,7 @@ func (storage *Database) LoadOrImport() (gamestate.State, error) {
 		return gamestate.State{}, fmt.Errorf("decode CN SQLite account: %w", err)
 	}
 	if err := transaction.Commit(); err != nil {
-		return gamestate.State{}, fmt.Errorf("commit CN database initialization: %w", err)
-	}
-	committed = true
-	if _, err := database.ExecContext(
-		context.Background(),
-		`INSERT INTO cn_local_account
-		 (user_id, login_uuid, session_key, created_utc, last_login_utc)
-		 VALUES (?, ?, ?, ?, ?)
-		 ON CONFLICT(user_id) DO NOTHING`,
-		PrimaryUserID,
-		unboundPrimaryLoginUUID,
-		unboundPrimarySessionKey,
-		time.Now().UTC().Format(time.RFC3339Nano),
-		time.Now().UTC().Format(time.RFC3339Nano),
-	); err != nil {
-		return gamestate.State{}, fmt.Errorf("create primary CN login row: %w", err)
-	}
-	if err := storage.MigratePrimarySnapshot(); err != nil {
 		return gamestate.State{}, err
-	}
-	if imported {
-		storage.logger.Info("initialized CN account in SQLite", "database_path", storage.databasePath)
 	}
 	return state, nil
 }
@@ -241,7 +290,7 @@ func (storage *Database) persistWithAudit(state gamestate.State, audit *AdminAud
 		}
 	}()
 	updatedUTC := time.Now().UTC().Format(time.RFC3339Nano)
-	if err := writePrimaryAccountSnapshot(transaction, state, content, digestText, updatedUTC, audit); err != nil {
+	if err := writeAccountSnapshot(transaction, state.User.UserID, state, content, digestText, updatedUTC, audit); err != nil {
 		return err
 	}
 	if err := transaction.Commit(); err != nil {
@@ -249,60 +298,6 @@ func (storage *Database) persistWithAudit(state gamestate.State, audit *AdminAud
 	}
 	committed = true
 	return nil
-}
-
-func writePrimaryAccountSnapshot(transaction *sql.Tx, state gamestate.State, content []byte, digestText, updatedUTC string, audit *AdminAudit) error {
-	if err := writeAccountRows(transaction, state); err != nil {
-		return err
-	}
-	result, err := transaction.ExecContext(
-		context.Background(),
-		`UPDATE cn_save_snapshot
-		 SET schema_version = ?, revision = revision + 1, updated_utc = ?,
-		     payload_json = ?, payload_sha256 = ?
-		 WHERE singleton = 1`,
-		saveSnapshotSchemaVersion,
-		updatedUTC,
-		content,
-		digestText,
-	)
-	if err != nil {
-		return fmt.Errorf("write CN SQLite snapshot: %w", err)
-	}
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("confirm CN SQLite snapshot update: %w", err)
-	}
-	if rowsAffected != 1 {
-		return fmt.Errorf("CN SQLite snapshot update affected %d rows, want 1", rowsAffected)
-	}
-	var accountExists int
-	if err := transaction.QueryRowContext(
-		context.Background(),
-		`SELECT COUNT(*) FROM cn_local_account WHERE user_id = ?`,
-		state.User.UserID,
-	).Scan(&accountExists); err != nil {
-		return fmt.Errorf("check primary CN account projection owner: %w", err)
-	}
-	if accountExists == 1 {
-		var revision int
-		if err := transaction.QueryRowContext(
-			context.Background(),
-			`SELECT revision FROM cn_save_snapshot WHERE singleton = 1`,
-		).Scan(&revision); err != nil {
-			return fmt.Errorf("read primary CN snapshot revision: %w", err)
-		}
-		if err := upsertAccountProjection(
-			transaction,
-			state.User.UserID,
-			revision,
-			updatedUTC,
-			state,
-		); err != nil {
-			return err
-		}
-	}
-	return audit.appendTo(transaction, updatedUTC)
 }
 
 // Open returns the single-writer pool, owned by Database. Callers close rows and
