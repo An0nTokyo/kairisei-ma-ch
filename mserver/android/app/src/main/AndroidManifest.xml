@@ -21,6 +21,9 @@
         <activity
             android:name=".LogActivity"
             android:exported="false" />
+        <activity
+            android:name=".TransferActivity"
+            android:exported="false" />
         <service
             android:name=".ServerService"
             android:exported="false"

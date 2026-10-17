@@ -5,7 +5,13 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 object SyncClient {
-    data class Response(val code: Int, val error: String, val serverRevision: Int, val phoneRevision: Int)
+    data class Response(
+        val code: Int,
+        val error: String,
+        val serverRevision: Int,
+        val phoneRevision: Int,
+        val body: String,
+    )
 
     fun post(localPort: Int, path: String, body: String): Response {
         val connection = URL("http://127.0.0.1:$localPort$path").openConnection() as HttpURLConnection
@@ -22,6 +28,7 @@ object SyncClient {
             json?.optString("error").orEmpty(),
             json?.optInt("server_revision") ?: 0,
             json?.optInt("phone_revision") ?: 0,
+            text,
         )
     }
 }
