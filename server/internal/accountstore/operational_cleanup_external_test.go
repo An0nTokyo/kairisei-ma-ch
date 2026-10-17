@@ -26,11 +26,11 @@ func TestOperationalCleanupPreservesAccountsAndRollsBack(t *testing.T) {
 	}
 	refs := accountstore.OperationalReferences{Gachas: map[int]bool{11: true}, Items: map[int]bool{12: true}, Events: map[int]bool{13: true}, Trades: map[int]bool{14: true}}
 	original := map[int][]byte{}
+	if err := d.MigratePrimarySnapshot(); err != nil {
+		t.Fatal(err)
+	}
 	for _, uid := range []int{accountstore.PrimaryUserID, id} {
 		table, key, value := "cn_account_snapshot", "user_id", uid
-		if uid == accountstore.PrimaryUserID {
-			table, key, value = "cn_save_snapshot", "singleton", 1
-		}
 		var raw []byte
 		if err := db.QueryRow("SELECT payload_json FROM "+table+" WHERE "+key+"=?", value).Scan(&raw); err != nil {
 			t.Fatal(err)
@@ -75,7 +75,7 @@ func TestOperationalCleanupPreservesAccountsAndRollsBack(t *testing.T) {
 		t.Fatal("injected cleanup failure ignored")
 	}
 	var after []byte
-	_ = db.QueryRow(`SELECT payload_json FROM cn_save_snapshot WHERE singleton=1`).Scan(&after)
+	_ = db.QueryRow(`SELECT payload_json FROM cn_account_snapshot WHERE user_id=?`, accountstore.PrimaryUserID).Scan(&after)
 	if string(after) != string(original[accountstore.PrimaryUserID]) {
 		t.Fatal("partial cleanup committed")
 	}
@@ -88,9 +88,6 @@ func TestOperationalCleanupPreservesAccountsAndRollsBack(t *testing.T) {
 	}
 	for _, uid := range []int{accountstore.PrimaryUserID, id} {
 		table, key, value := "cn_account_snapshot", "user_id", uid
-		if uid == accountstore.PrimaryUserID {
-			table, key, value = "cn_save_snapshot", "singleton", 1
-		}
 		var raw []byte
 		var sha string
 		_ = db.QueryRow("SELECT payload_json,payload_sha256 FROM "+table+" WHERE "+key+"=?", value).Scan(&raw, &sha)

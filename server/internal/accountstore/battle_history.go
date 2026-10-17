@@ -102,11 +102,7 @@ func (accounts *Accounts) PersistSoloClear(state gamestate.State, record gamesta
 	}
 	defer tx.Rollback()
 	var old []byte
-	if record.UserID == PrimaryUserID {
-		err = tx.QueryRow(`SELECT payload_json FROM cn_save_snapshot WHERE singleton=1`).Scan(&old)
-	} else {
-		err = tx.QueryRow(`SELECT payload_json FROM cn_account_snapshot WHERE user_id=?`, record.UserID).Scan(&old)
-	}
+	err = tx.QueryRow(`SELECT payload_json FROM cn_account_snapshot WHERE user_id=?`, record.UserID).Scan(&old)
 	if err != nil {
 		return err
 	}
@@ -123,11 +119,7 @@ func (accounts *Accounts) PersistSoloClear(state gamestate.State, record gamesta
 	}
 	digest := sha256.Sum256(content)
 	updated := time.Now().UTC().Format(time.RFC3339Nano)
-	if record.UserID == PrimaryUserID {
-		err = writePrimaryAccountSnapshot(tx, state, content, hex.EncodeToString(digest[:]), updated, nil)
-	} else {
-		err = writeAccountSnapshot(tx, record.UserID, state, content, hex.EncodeToString(digest[:]), updated, nil)
-	}
+	err = writeAccountSnapshot(tx, record.UserID, state, content, hex.EncodeToString(digest[:]), updated, nil)
 	if err != nil {
 		return err
 	}

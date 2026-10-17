@@ -194,13 +194,12 @@ func (accounts *Accounts) QueryFilteredAccounts(filter AccountFilter, limit, off
 	from := ` FROM cn_local_account a
 		LEFT JOIN cn_account_credentials c ON c.user_id=a.user_id
 		LEFT JOIN cn_account_projection p ON p.user_id=a.user_id
-		LEFT JOIN cn_save_snapshot s ON s.singleton=1 AND a.user_id=?
 		LEFT JOIN cn_account_snapshot x ON x.user_id=a.user_id`
 	name := `COALESCE(json_extract(CAST(p.payload_json AS TEXT),'$.user.name'),'')`
 	level := `COALESCE(json_extract(CAST(p.payload_json AS TEXT),'$.user.level'),0)`
 	job := `COALESCE(json_extract(CAST(p.payload_json AS TEXT),'$.user.active_arthur_type'),0)`
 	where := ` WHERE (? OR a.user_id<?)`
-	args := []any{PrimaryUserID, filter.IncludeSystem, SystemPartnerUserIDBase}
+	args := []any{filter.IncludeSystem, SystemPartnerUserIDBase}
 	for _, q := range strings.Fields(strings.ToLower(filter.Search)) {
 		where += ` AND instr(lower(CAST(a.user_id AS TEXT)||' '||a.login_uuid||' '||COALESCE(c.username,'')||' '||` + name + `),?)>0`
 		args = append(args, q)
@@ -266,7 +265,7 @@ func (accounts *Accounts) QueryFilteredAccounts(filter AccountFilter, limit, off
 	case "level":
 		order = level + " DESC,a.user_id"
 	}
-	query := `SELECT a.user_id,a.login_uuid,COALESCE(c.username,''),` + name + `,a.created_utc,a.last_login_utc,COALESCE(s.revision,x.revision,0),COALESCE(s.updated_utc,x.updated_utc,''),
+	query := `SELECT a.user_id,a.login_uuid,COALESCE(c.username,''),` + name + `,a.created_utc,a.last_login_utc,COALESCE(x.revision,0),COALESCE(x.updated_utc,''),
 		` + level + `,
 		` + job + `,
 		COALESCE(json_extract(CAST(p.payload_json AS TEXT),'$.user.gold'),0),
@@ -313,10 +312,6 @@ func (accounts *Accounts) SnapshotMetadata(userID int) (int, string, error) {
 	}
 	query := `SELECT revision, updated_utc FROM cn_account_snapshot WHERE user_id = ?`
 	arguments := []any{userID}
-	if userID == PrimaryUserID {
-		query = `SELECT revision, updated_utc FROM cn_save_snapshot WHERE singleton = 1`
-		arguments = nil
-	}
 	var revision int
 	var updated string
 	if err := database.QueryRow(query, arguments...).Scan(&revision, &updated); err != nil {

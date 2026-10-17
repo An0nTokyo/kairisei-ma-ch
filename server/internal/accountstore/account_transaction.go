@@ -45,11 +45,7 @@ func (accounts *Accounts) PersistStates(states []gamestate.State) error {
 	for i, state := range states {
 		digest := sha256.Sum256(contents[i])
 		digestText := hex.EncodeToString(digest[:])
-		if state.User.UserID == PrimaryUserID {
-			err = writePrimaryAccountSnapshot(transaction, state, contents[i], digestText, updatedUTC, nil)
-		} else {
-			err = writeAccountSnapshot(transaction, state.User.UserID, state, contents[i], digestText, updatedUTC, nil)
-		}
+		err = writeAccountSnapshot(transaction, state.User.UserID, state, contents[i], digestText, updatedUTC, nil)
 		if err != nil {
 			return err
 		}

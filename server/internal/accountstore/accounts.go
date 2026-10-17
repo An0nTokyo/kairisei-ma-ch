@@ -439,6 +439,10 @@ func (accounts *Accounts) resolveLoginTransaction(ctx context.Context, transacti
 		identity.SessionKey = sessionKey
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return accountIdentity{}, fmt.Errorf("read CN local account: %w", err)
+	} else if adopted, adoptErr := accounts.adoptUnboundPrimary(ctx, transaction, loginUUID, now); adoptErr != nil {
+		return accountIdentity{}, adoptErr
+	} else if adopted.UserID != 0 {
+		identity = adopted
 	} else {
 		var nextUserID int
 		if err := transaction.QueryRowContext(
@@ -504,6 +508,40 @@ func (accounts *Accounts) resolveLoginTransaction(ctx context.Context, transacti
 	return identity, nil
 }
 
+func (accounts *Accounts) adoptUnboundPrimary(ctx context.Context, transaction *sql.Tx, loginUUID, now string) (accountIdentity, error) {
+	var userID int
+	err := transaction.QueryRowContext(
+		ctx,
+		`SELECT user_id FROM cn_local_account WHERE user_id = ? AND login_uuid = ?`,
+		PrimaryUserID,
+		unboundPrimaryLoginUUID,
+	).Scan(&userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return accountIdentity{}, nil
+	}
+	if err != nil {
+		return accountIdentity{}, fmt.Errorf("read unbound primary CN account: %w", err)
+	}
+	sessionKey, err := newSessionKey()
+	if err != nil {
+		return accountIdentity{}, err
+	}
+	if _, err := transaction.ExecContext(
+		ctx,
+		`UPDATE cn_local_account
+		 SET login_uuid = ?, session_key = ?, last_login_utc = ?
+		 WHERE user_id = ? AND login_uuid = ?`,
+		loginUUID,
+		sessionKey,
+		now,
+		PrimaryUserID,
+		unboundPrimaryLoginUUID,
+	); err != nil {
+		return accountIdentity{}, fmt.Errorf("bind primary CN account: %w", err)
+	}
+	return accountIdentity{UserID: PrimaryUserID, LoginUUID: loginUUID, SessionKey: sessionKey}, nil
+}
+
 func (accounts *Accounts) insertSeedSnapshot(ctx context.Context, transaction *sql.Tx, userID int, now string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -546,11 +584,11 @@ func (accounts *Accounts) LoadState(userID int) (gamestate.State, error) {
 }
 
 func (accounts *Accounts) LoadPersistentState(userID int) (gamestate.State, error) {
-	if userID == PrimaryUserID {
-		return accounts.storage.LoadOrImport()
-	}
 	if userID < PrimaryUserID {
 		return gamestate.State{}, errors.New("CN local user ID is invalid")
+	}
+	if err := accounts.storage.MigratePrimarySnapshot(); err != nil {
+		return gamestate.State{}, err
 	}
 	database, err := accounts.storage.OpenRead()
 	if err != nil {
@@ -606,9 +644,6 @@ func (accounts *Accounts) PersistStateWithAudit(userID int, state gamestate.Stat
 func (accounts *Accounts) persistAccountData(userID int, state gamestate.State, audit *AdminAudit) error {
 	if state.User.UserID != userID {
 		return errors.New("refusing to persist a CN account under a different user ID")
-	}
-	if userID == PrimaryUserID {
-		return accounts.storage.persistWithAudit(state, audit)
 	}
 	content, err := EncodeAccountMetadata(state)
 	if err != nil {

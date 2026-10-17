@@ -192,20 +192,14 @@ func (storage *Database) syncAccountProjections(transaction *sql.Tx) error {
 		context.Background(),
 		`SELECT account.user_id
 		 FROM cn_local_account AS account
-		 LEFT JOIN cn_save_snapshot AS primary_snapshot
-		   ON account.user_id = ? AND primary_snapshot.singleton = 1
 		 LEFT JOIN cn_account_snapshot AS account_snapshot
 		   ON account_snapshot.user_id = account.user_id
 		 LEFT JOIN cn_account_projection AS projection
 		   ON projection.user_id = account.user_id
 		 WHERE projection.user_id IS NULL OR projection.schema_version <> ? OR
-		       projection.snapshot_revision <> CASE
-		        WHEN account.user_id = ? THEN primary_snapshot.revision
-		        ELSE account_snapshot.revision END
+		       projection.snapshot_revision <> account_snapshot.revision
 		 ORDER BY account.user_id`,
-		PrimaryUserID,
 		accountProjectionSchemaVersion,
-		PrimaryUserID,
 	)
 	if err != nil {
 		return fmt.Errorf("list stale CN account projections: %w", err)
@@ -231,11 +225,6 @@ func (storage *Database) syncAccountProjections(transaction *sql.Tx) error {
 		query := `SELECT revision, updated_utc, payload_json, payload_sha256
 			FROM cn_account_snapshot WHERE user_id = ?`
 		arguments := []any{userID}
-		if userID == PrimaryUserID {
-			query = `SELECT revision, updated_utc, payload_json, payload_sha256
-				FROM cn_save_snapshot WHERE singleton = 1`
-			arguments = nil
-		}
 		var revision int
 		var updatedUTC string
 		var content []byte

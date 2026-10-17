@@ -249,17 +249,10 @@ func (d *Database) cleanupOperationalState(ctx context.Context, refs Operational
 	}
 	report.Entries = map[string]int{}
 	visit := func(fn func(int, string, int, []byte, string) error) error {
-		// Primary account has its own canonical table; skip any legacy mirror.
 		var raw []byte
 		var sha string
 		var revision int
-		if err := tx.QueryRowContext(ctx, `SELECT revision,payload_json,payload_sha256 FROM cn_save_snapshot WHERE singleton=1`).Scan(&revision, &raw, &sha); err != nil {
-			return err
-		}
-		if err := fn(PrimaryUserID, "cn_save_snapshot", revision, raw, sha); err != nil {
-			return err
-		}
-		last := PrimaryUserID
+		last := PrimaryUserID - 1
 		for {
 			rows, err := tx.QueryContext(ctx, `SELECT user_id FROM cn_account_snapshot WHERE user_id>? ORDER BY user_id LIMIT 64`, last)
 			if err != nil {
@@ -379,11 +372,7 @@ func (d *Database) cleanupOperationalState(ctx context.Context, refs Operational
 			return err
 		}
 		sum := sha256.Sum256(next)
-		key, value := "user_id", id
-		if table == "cn_save_snapshot" {
-			key, value = "singleton", 1
-		}
-		_, err = tx.ExecContext(ctx, "UPDATE "+table+" SET revision=revision+1,updated_utc=?,payload_json=?,payload_sha256=? WHERE "+key+"=?", now, next, hex.EncodeToString(sum[:]), value)
+		_, err = tx.ExecContext(ctx, "UPDATE "+table+" SET revision=revision+1,updated_utc=?,payload_json=?,payload_sha256=? WHERE user_id=?", now, next, hex.EncodeToString(sum[:]), id)
 		if err != nil {
 			return err
 		}

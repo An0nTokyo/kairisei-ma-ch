@@ -9,6 +9,11 @@ import (
 	"fmt"
 )
 
+const (
+	unboundPrimaryLoginUUID  = "primary-unbound"
+	unboundPrimarySessionKey = "primary-unbound-session"
+)
+
 func (storage *Database) MigratePrimarySnapshot() error {
 	if err := storage.EnsureSchema(); err != nil {
 		return err
@@ -22,6 +27,27 @@ func (storage *Database) MigratePrimarySnapshot() error {
 		return err
 	}
 	defer transaction.Rollback()
+	// The singleton is frozen after the first copy. Repeating the copy would
+	// replace later saves with that frozen row.
+	if _, err := transaction.Exec(`CREATE TABLE IF NOT EXISTS cn_primary_snapshot_migrated (
+		singleton INTEGER PRIMARY KEY CHECK (singleton = 1)
+	)`); err != nil {
+		return err
+	}
+	var already int
+	if err := transaction.QueryRow(`SELECT COUNT(*) FROM cn_primary_snapshot_migrated WHERE singleton = 1`).Scan(&already); err != nil {
+		return err
+	}
+	if already == 1 {
+		return nil
+	}
+	var localAccount int
+	if err := transaction.QueryRow(`SELECT COUNT(*) FROM cn_local_account WHERE user_id = ?`, PrimaryUserID).Scan(&localAccount); err != nil {
+		return err
+	}
+	if localAccount == 0 {
+		return nil
+	}
 	var revision int
 	var updated string
 	var payload []byte
@@ -49,6 +75,9 @@ func (storage *Database) MigratePrimarySnapshot() error {
 		 payload_sha256 = excluded.payload_sha256`,
 		PrimaryUserID, revision, updated, payload, digestText); err != nil {
 		return fmt.Errorf("copy primary CN snapshot: %w", err)
+	}
+	if _, err := transaction.Exec(`INSERT INTO cn_primary_snapshot_migrated (singleton) VALUES (1)`); err != nil {
+		return fmt.Errorf("record primary CN snapshot migration: %w", err)
 	}
 	return transaction.Commit()
 }

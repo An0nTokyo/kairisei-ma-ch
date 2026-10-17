@@ -163,6 +163,23 @@ func (storage *Database) LoadOrImport() (gamestate.State, error) {
 		return gamestate.State{}, fmt.Errorf("commit CN database initialization: %w", err)
 	}
 	committed = true
+	if _, err := database.ExecContext(
+		context.Background(),
+		`INSERT INTO cn_local_account
+		 (user_id, login_uuid, session_key, created_utc, last_login_utc)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(user_id) DO NOTHING`,
+		PrimaryUserID,
+		unboundPrimaryLoginUUID,
+		unboundPrimarySessionKey,
+		time.Now().UTC().Format(time.RFC3339Nano),
+		time.Now().UTC().Format(time.RFC3339Nano),
+	); err != nil {
+		return gamestate.State{}, fmt.Errorf("create primary CN login row: %w", err)
+	}
+	if err := storage.MigratePrimarySnapshot(); err != nil {
+		return gamestate.State{}, err
+	}
 	if imported {
 		storage.logger.Info("initialized CN account in SQLite", "database_path", storage.databasePath)
 	}

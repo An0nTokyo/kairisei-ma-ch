@@ -52,9 +52,6 @@ func TestAdminAccountMutationAndAuditCommitTogether(t *testing.T) {
 					t.Helper()
 					query := "SELECT revision, payload_sha256 FROM cn_account_snapshot WHERE user_id = ?"
 					arguments := []any{userID}
-					if userID == accountstore.PrimaryUserID {
-						query, arguments = "SELECT revision, payload_sha256 FROM cn_save_snapshot WHERE singleton = 1", nil
-					}
 					var revision, projectionRevision int
 					var digest, projectionDigest string
 					if err := db.QueryRow(query, arguments...).Scan(&revision, &digest); err != nil {

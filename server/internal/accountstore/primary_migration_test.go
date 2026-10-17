@@ -43,6 +43,72 @@ func TestMigratePrimarySnapshotCopiesSingletonAndIgnoresStaleMirror(t *testing.T
 	}
 }
 
+func TestPrimaryAccountRoundTripUsesAccountSnapshot(t *testing.T) {
+	storage := openMigrationDatabase(t)
+	state, err := LoadSaveState(storage.seedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := InitializeOnboardingSnapshot(&state, PrimaryUserID); err != nil {
+		t.Fatal(err)
+	}
+	content, err := EncodeAccountMetadata(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, storage, `INSERT INTO cn_local_account
+		(user_id, login_uuid, session_key, created_utc, last_login_utc)
+		VALUES (1000001, 'primary-uuid', 'primary-session', 't', 't')`)
+	mustExec(t, storage, `INSERT INTO cn_save_snapshot
+		(singleton, schema_version, revision, updated_utc, payload_json, payload_sha256)
+		VALUES (1, 3, 7, 't', ?, ?)`, content, digestOf(content))
+	database, err := storage.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	transaction, err := database.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeAccountRows(transaction, state); err != nil {
+		t.Fatal(err)
+	}
+	if err := transaction.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.MigratePrimarySnapshot(); err != nil {
+		t.Fatal(err)
+	}
+	accounts, err := NewAccounts(storage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := accounts.LoadPersistentState(PrimaryUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.User.UserID != PrimaryUserID {
+		t.Fatalf("user id = %d", loaded.User.UserID)
+	}
+	loaded.User.Gold += 11
+	if err := accounts.PersistState(PrimaryUserID, loaded); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := accounts.LoadPersistentState(PrimaryUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.User.Gold != loaded.User.Gold {
+		t.Fatalf("gold = %d, want %d", reloaded.User.Gold, loaded.User.Gold)
+	}
+	var revision int
+	var still []byte
+	mustQuery(t, storage, `SELECT revision, payload_json FROM cn_save_snapshot WHERE singleton = 1`, &revision, &still)
+	if revision != 7 || string(still) != string(content) {
+		t.Fatalf("singleton changed to revision %d (%d bytes)", revision, len(still))
+	}
+}
+
 func TestMigratePrimarySnapshotRejectsDigestMismatch(t *testing.T) {
 	storage := openMigrationDatabase(t)
 	mustExec(t, storage, `INSERT INTO cn_local_account

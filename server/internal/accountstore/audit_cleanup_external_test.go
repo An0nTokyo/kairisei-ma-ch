@@ -50,7 +50,7 @@ func TestAuditCleanupTimeRangePreservesCurrentConfigAndReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 	var before string
-	_ = db.QueryRow(`SELECT payload_sha256 FROM cn_save_snapshot WHERE singleton=1`).Scan(&before)
+	_ = db.QueryRow(`SELECT payload_sha256 FROM cn_account_snapshot WHERE user_id=?`, accountstore.PrimaryUserID).Scan(&before)
 	from, to := start.Format(time.RFC3339Nano), end.Format(time.RFC3339Nano)
 	preview, err := d.CleanupAuditHistory(context.Background(), from, to, "")
 	if err != nil || preview.Records != 2 {
@@ -96,7 +96,7 @@ func TestAuditCleanupTimeRangePreservesCurrentConfigAndReceipts(t *testing.T) {
 		t.Fatal("configuration keeps hidden revisions")
 	}
 	var after string
-	_ = db.QueryRow(`SELECT payload_sha256 FROM cn_save_snapshot WHERE singleton=1`).Scan(&after)
+	_ = db.QueryRow(`SELECT payload_sha256 FROM cn_account_snapshot WHERE user_id=?`, accountstore.PrimaryUserID).Scan(&after)
 	if before != after {
 		t.Fatal("player state changed")
 	}
