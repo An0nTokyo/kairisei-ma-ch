@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 type Holder struct {
@@ -62,6 +63,20 @@ func (accounts *Accounts) Holder(userID int) (Holder, error) {
 	}
 	holder.Frozen = frozen == 1
 	return holder, nil
+}
+
+func (accounts *Accounts) RefuseIfAwayFromServer(userID int) error {
+	holder, err := accounts.Holder(userID)
+	if err != nil {
+		if strings.Contains(err.Error(), "missing") {
+			return nil
+		}
+		return err
+	}
+	if holder.HolderID != "s" || holder.Frozen {
+		return errors.New("CN account holder refused this server")
+	}
+	return nil
 }
 
 func (accounts *Accounts) RefuseIfNotHolder(userID int, holderID string) error {

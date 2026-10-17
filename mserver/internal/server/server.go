@@ -15,6 +15,7 @@ import (
 type Deps struct {
 	Accounts   *localcn.Store
 	DeviceID   string
+	DataDir    string
 	GamePort   int
 	Interfaces func() ([]addresses.Interface, error)
 }
@@ -44,6 +45,11 @@ func NewHandler(deps Deps) http.Handler {
 	mux.Handle("GET /local/server/default.list", list)
 	mux.Handle("GET /local/server/apple-review.list", list)
 	mux.Handle("GET /local/server/qa.list", list)
+	accountSync := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		serveAccountSync(deps, writer, request)
+	})
+	mux.Handle("POST /local/launcher/borrow", accountSync)
+	mux.Handle("POST /local/launcher/return", accountSync)
 	mux.Handle("/", degrade.Handler())
 	return mux
 }

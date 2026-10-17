@@ -369,6 +369,14 @@ func (accounts *Accounts) ResolveLogin(loginUUID string) (accountIdentity, error
 	return accounts.ResolveLoginContext(context.Background(), loginUUID)
 }
 
+func (accounts *Accounts) ResolveLoginUser(loginUUID string) (int, error) {
+	identity, err := accounts.ResolveLoginContext(context.Background(), loginUUID)
+	if err != nil {
+		return 0, err
+	}
+	return identity.UserID, nil
+}
+
 func (accounts *Accounts) ResolveLoginContext(ctx context.Context, loginUUID string) (accountIdentity, error) {
 	if err := ctx.Err(); err != nil {
 		return accountIdentity{}, err

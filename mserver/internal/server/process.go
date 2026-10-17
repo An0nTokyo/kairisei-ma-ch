@@ -69,6 +69,7 @@ func Start(dataDir string, portText string) (*Running, error) {
 		Handler: NewHandler(Deps{
 			Accounts:   store,
 			DeviceID:   deviceID,
+			DataDir:    dataDir,
 			GamePort:   gamePort,
 			Interfaces: currentInterfaces,
 		}),

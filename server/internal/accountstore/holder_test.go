@@ -39,4 +39,10 @@ func TestHolderRefusesNonOwner(t *testing.T) {
 	if err := accounts.RefuseIfNotHolder(PrimaryUserID, "device-a"); err == nil || !strings.Contains(err.Error(), "holder") {
 		t.Fatalf("frozen holder error = %v", err)
 	}
+	if err := accounts.RefuseIfAwayFromServer(PrimaryUserID); err == nil || !strings.Contains(err.Error(), "holder") {
+		t.Fatalf("server refusal while frozen = %v", err)
+	}
+	if err := accounts.RefuseIfAwayFromServer(PrimaryUserID + 1); err != nil {
+		t.Fatal(err)
+	}
 }

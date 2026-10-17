@@ -3,6 +3,7 @@ package accountstore
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -74,10 +75,32 @@ func (accounts *Accounts) ImportAccount(transfer AccountTransfer) error {
 	var revision int
 	var updated string
 	var digestText string
-	if err := transaction.QueryRowContext(context.Background(),
+	err = transaction.QueryRowContext(context.Background(),
 		`SELECT revision, updated_utc, payload_sha256 FROM cn_account_snapshot WHERE user_id = ?`,
 		transfer.UserID,
-	).Scan(&revision, &updated, &digestText); err != nil {
+	).Scan(&revision, &updated, &digestText)
+	if errors.Is(err, sql.ErrNoRows) {
+		updated = time.Now().UTC().Format(time.RFC3339Nano)
+		if transfer.Revision < 1 {
+			return errors.New("CN account transfer revision is invalid")
+		}
+		if _, err := transaction.ExecContext(context.Background(),
+			`INSERT INTO cn_account_snapshot
+			 (user_id, schema_version, revision, updated_utc, payload_json, payload_sha256)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+			transfer.UserID, saveSnapshotSchemaVersion, transfer.Revision, updated, transfer.Metadata, transfer.MetadataDigest,
+		); err != nil {
+			return fmt.Errorf("insert CN account transfer: %w", err)
+		}
+		if err := upsertAccountProjection(transaction, transfer.UserID, transfer.Revision, updated, transfer.Account); err != nil {
+			return err
+		}
+		if err := transaction.Commit(); err != nil {
+			return fmt.Errorf("commit CN account transfer: %w", err)
+		}
+		return nil
+	}
+	if err != nil {
 		return fmt.Errorf("read CN account transfer target: %w", err)
 	}
 	if digestText != transfer.MetadataDigest {

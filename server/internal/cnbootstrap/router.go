@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
+	"kairisei.local/server/accountsync"
 	"kairisei.local/server/internal/accounthttp"
 	"kairisei.local/server/internal/accountstore"
 	adminapi "kairisei.local/server/internal/admin"
@@ -103,10 +105,26 @@ func (app *application) router() chi.Router {
 	router.Post("/d/*", emptyJSON)
 	router.Post("/log.php", acknowledgeClientLog)
 	router.Post("/mods_switch.php", cnBootstrapModuleSwitches)
-	router.Post("/loginSDK.php", cnBootstrapLogin(app.accounts, app.config.Network.AdvertiseHost, app.config.Network.HTTPPort, app.config.CDN, resourceVersionNamespace(app.resources.Catalog, app.resources.CPKList, app.resources.CPKState), app.resources.Images.Namespace))
+	login := refuseAwayLogin(app.accounts, cnBootstrapLogin(app.accounts, app.config.Network.AdvertiseHost, app.config.Network.HTTPPort, app.config.CDN, resourceVersionNamespace(app.resources.Catalog, app.resources.CPKList, app.resources.CPKState), app.resources.Images.Namespace))
+	router.Post("/loginSDK.php", login.ServeHTTP)
 	accountGateway := newCNAccountGateway(app.accounts)
 	for _, action := range []string{"status", "bind", "login"} {
 		router.Post("/local/account/"+action, accountGateway.ServeHTTP)
+	}
+	if app.config.SyncToken != "" {
+		syncHandler := accountsync.Handler(app.config.SyncToken, accountSyncDB{
+			accounts:   app.accounts,
+			cardsPath:  app.config.Masters.Cards,
+			growthPath: app.config.Masters.PlayerProgression,
+		})
+		for _, path := range []string{
+			"/local/sync/borrow",
+			"/local/sync/borrow/abort",
+			"/local/sync/borrow/commit",
+			"/local/sync/return",
+		} {
+			router.Post(path, http.HandlerFunc(syncHandler.ServeHTTP))
+		}
 	}
 	router.Post("/subcribe_push.php", cnBootstrapPushRegistration)
 	app.registerGameRoutes(router)
@@ -137,7 +155,7 @@ func (app *application) router() chi.Router {
 
 func (app *application) maintenanceRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead || strings.HasPrefix(r.URL.Path, "/local/sync/") {
 			next.ServeHTTP(w, r)
 			return
 		}

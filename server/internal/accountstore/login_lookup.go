@@ -7,6 +7,10 @@ import (
 	"strings"
 )
 
+func (accounts *Accounts) OpenStorage() (*sql.DB, error) {
+	return accounts.storage.Open()
+}
+
 func (accounts *Accounts) FindLogin(loginUUID string) (int, bool, error) {
 	loginUUID = strings.ToLower(strings.TrimSpace(loginUUID))
 	if !validLoginUUID(loginUUID) {

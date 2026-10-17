@@ -16,6 +16,7 @@ type Config struct {
 	Multiplayer *multiplayer.Hub
 	CDN         CDNConfig
 	Logger      *slog.Logger
+	SyncToken   string
 }
 
 type PersistenceConfig struct {

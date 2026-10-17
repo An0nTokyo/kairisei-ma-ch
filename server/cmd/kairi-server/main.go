@@ -64,6 +64,7 @@ type options struct {
 	battlePort                int
 	adminListenHost           string
 	adminPort                 int
+	accountSyncToken          string
 	shutdownEvent             string
 }
 
@@ -132,6 +133,7 @@ func run(arguments []string, logger *slog.Logger) error {
 	flags.IntVar(&opts.battlePort, "battle-port", 0, "local BattleSv TCP port; defaults to HTTP port plus one")
 	flags.StringVar(&opts.adminListenHost, "admin-listen-host", "127.0.0.1", "loopback-only Admin Web listen address")
 	flags.IntVar(&opts.adminPort, "admin-port", 0, "loopback-only Admin Web port; zero disables it")
+	flags.StringVar(&opts.accountSyncToken, "account-sync-token", "", "shared secret for phone account borrow and return; empty disables those routes")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
@@ -278,6 +280,7 @@ func run(arguments []string, logger *slog.Logger) error {
 				Multiplayer: multiplayerHub,
 				CDN:         cdn,
 				Logger:      logger,
+				SyncToken:   opts.accountSyncToken,
 			})
 		}
 	default:
