@@ -16,7 +16,7 @@ import (
 const (
 	ServerHolderID = "s"
 	tokenHeader    = "X-Account-Sync-Token"
-	maxBody        = 128 << 20
+	maxBody        = 512 << 20
 )
 
 type HolderView struct {
@@ -35,6 +35,7 @@ type DB interface {
 	LoginUUID(userID int) (string, error)
 	DeliverHeldMail(userID int) error
 	MasterFiles() (cards, growth []byte, err error)
+	ExtraMasters() (map[string][]byte, error)
 }
 
 type Phone interface {
@@ -45,6 +46,7 @@ type Phone interface {
 	SaveHolder(userID int, holderID string, checkoutRevision int, masterDigest string, frozen bool) error
 	ReadMasters() (cards, growth []byte, ok bool, err error)
 	WriteMasters(cards, growth []byte) error
+	WriteExtraMasters(files map[string][]byte) error
 }
 
 type ChoiceRequiredError struct {
@@ -59,12 +61,13 @@ type Service struct {
 }
 
 type borrowResponse struct {
-	Transfer     []byte `json:"transfer"`
-	LoginUUID    string `json:"login_uuid"`
-	Cards        []byte `json:"cards"`
-	Growth       []byte `json:"growth"`
-	Revision     int    `json:"revision"`
-	MasterDigest string `json:"master_digest"`
+	Transfer     []byte            `json:"transfer"`
+	LoginUUID    string            `json:"login_uuid"`
+	Cards        []byte            `json:"cards"`
+	Growth       []byte            `json:"growth"`
+	Revision     int               `json:"revision"`
+	MasterDigest string            `json:"master_digest"`
+	Masters      map[string][]byte `json:"masters,omitempty"`
 }
 
 func (service Service) PrepareBorrow(userID int, deviceID string) (borrowResponse, error) {
@@ -81,6 +84,15 @@ func (service Service) PrepareBorrow(userID int, deviceID string) (borrowRespons
 	cards, growth, err := service.DB.MasterFiles()
 	if err != nil {
 		return borrowResponse{}, err
+	}
+	extra, err := service.DB.ExtraMasters()
+	if err != nil {
+		return borrowResponse{}, err
+	}
+	for name := range extra {
+		if _, ok := extraMasterNames[name]; !ok {
+			return borrowResponse{}, errors.New("account master name is invalid")
+		}
 	}
 	digest := accountstore.MasterDigest(cards, growth)
 	revision, err := service.DB.Revision(userID)
@@ -112,6 +124,7 @@ func (service Service) PrepareBorrow(userID int, deviceID string) (borrowRespons
 		Growth:       growth,
 		Revision:     revision,
 		MasterDigest: digest,
+		Masters:      extra,
 	}, nil
 }
 
@@ -296,6 +309,10 @@ func Borrow(baseURL, token, deviceID string, userID int, phone Phone) error {
 			_ = abort(baseURL, token, userID)
 			return err
 		}
+	}
+	if err := phone.WriteExtraMasters(result.Masters); err != nil {
+		_ = abort(baseURL, token, userID)
+		return err
 	}
 	if err := phone.EnsureLogin(userID, result.LoginUUID, "borrowed-"+result.LoginUUID); err != nil {
 		_ = abort(baseURL, token, userID)

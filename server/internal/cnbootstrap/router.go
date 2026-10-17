@@ -35,6 +35,7 @@ func (app *application) router() chi.Router {
 	router.Use(normalizeLeadingSlashes)
 	router.Use(app.maintenanceRequests)
 	router.Use(authenticateCNSessions(app.accounts))
+	router.Use(refuseAwaySessions(app.accounts))
 	router.Get("/healthz", func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_ = json.NewEncoder(writer).Encode(map[string]any{
@@ -116,6 +117,7 @@ func (app *application) router() chi.Router {
 			accounts:   app.accounts,
 			cardsPath:  app.config.Masters.Cards,
 			growthPath: app.config.Masters.PlayerProgression,
+			masters:    app.config.Masters,
 		})
 		for _, path := range []string{
 			"/local/sync/borrow",

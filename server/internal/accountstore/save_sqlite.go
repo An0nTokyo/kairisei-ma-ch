@@ -420,4 +420,6 @@ func protectLocalDatabase(databasePath string) error {
 // setCatalog installs the prepared, immutable master snapshot before serving accounts.
 func (storage *Database) SetCatalog(state gamestate.State) { storage.catalog = &state }
 
+func (storage *Database) SeedPath() string { return storage.seedPath }
+
 func (accounts *Accounts) Database() *Database { return accounts.storage }

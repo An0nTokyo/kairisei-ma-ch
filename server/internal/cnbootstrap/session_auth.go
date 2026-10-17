@@ -54,9 +54,6 @@ func authenticateCNSessions(accounts *accountstore.Accounts) func(http.Handler) 
 				}
 				return
 			}
-			if refuseBorrowedAccount(writer, accounts, userID) {
-				return
-			}
 			request = request.WithContext(
 				context.WithValue(request.Context(), cnAuthenticatedUserKey{}, userID),
 			)
@@ -88,6 +85,18 @@ func refuseAwayLogin(accounts *accountstore.Accounts, next http.Handler) http.Ha
 		}
 		next.ServeHTTP(writer, request)
 	})
+}
+
+func refuseAwaySessions(accounts *accountstore.Accounts) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			userID, ok := request.Context().Value(cnAuthenticatedUserKey{}).(int)
+			if ok && refuseBorrowedAccount(writer, accounts, userID) {
+				return
+			}
+			next.ServeHTTP(writer, request)
+		})
+	}
 }
 
 func refuseBorrowedAccount(writer http.ResponseWriter, accounts *accountstore.Accounts, userID int) bool {

@@ -9,6 +9,7 @@ import (
 
 	"kairisei.local/mserver/internal/addresses"
 	"kairisei.local/mserver/internal/degrade"
+	"kairisei.local/mserver/internal/solo"
 	"kairisei.local/server/localcn"
 )
 
@@ -18,6 +19,9 @@ type Deps struct {
 	DataDir    string
 	GamePort   int
 	Interfaces func() ([]addresses.Interface, error)
+	Play       *localcn.Play
+	PlayNow    func() *localcn.Play
+	ResetPlay  func()
 }
 
 type localAddrKey struct{}
@@ -50,8 +54,20 @@ func NewHandler(deps Deps) http.Handler {
 	})
 	mux.Handle("POST /local/launcher/borrow", accountSync)
 	mux.Handle("POST /local/launcher/return", accountSync)
-	mux.Handle("/", degrade.Handler())
+	mux.Handle("/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if solo.Dispatch(deps.currentPlay(), writer, request) {
+			return
+		}
+		degrade.Handler().ServeHTTP(writer, request)
+	}))
 	return mux
+}
+
+func (deps Deps) currentPlay() *localcn.Play {
+	if deps.PlayNow != nil {
+		return deps.PlayNow()
+	}
+	return deps.Play
 }
 
 func serveLogin(deps Deps, writer http.ResponseWriter, request *http.Request) {

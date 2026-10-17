@@ -52,3 +52,7 @@ func (phone phoneStore) ReadMasters() ([]byte, []byte, bool, error) {
 func (phone phoneStore) WriteMasters(cards, growth []byte) error {
 	return accountsync.WriteMasterFiles(phone.dir, cards, growth)
 }
+
+func (phone phoneStore) WriteExtraMasters(files map[string][]byte) error {
+	return accountsync.WriteExtraMasterFiles(phone.dir, files)
+}

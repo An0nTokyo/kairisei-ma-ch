@@ -13,6 +13,7 @@ type accountSyncDB struct {
 	accounts   *accountstore.Accounts
 	cardsPath  string
 	growthPath string
+	masters    MastersConfig
 }
 
 func (db accountSyncDB) Holder(userID int) (accountsync.HolderView, error) {
@@ -91,4 +92,31 @@ func (db accountSyncDB) MasterFiles() ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 	return cards, growth, nil
+}
+
+func (db accountSyncDB) ExtraMasters() (map[string][]byte, error) {
+	paths := map[string]string{
+		"explore.bin":     db.masters.Explore,
+		"story.bin":       db.masters.Story,
+		"navi.bin":        db.masters.Navi,
+		"items.bin":       db.masters.Items,
+		"avatar.bin":      db.masters.Avatar,
+		"stamps.bin":      db.masters.Stamps,
+		"honors.bin":      db.masters.Honors,
+		"login-bonus.bin": db.masters.LoginBonus,
+		"battle.bin":      db.masters.Battle,
+		"pvp.bin":         db.masters.PVP,
+	}
+	files := map[string][]byte{}
+	for name, path := range paths {
+		if path == "" {
+			continue
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		files[name] = body
+	}
+	return files, nil
 }

@@ -53,6 +53,9 @@ func serveAccountSync(deps Deps, writer http.ResponseWriter, request *http.Reque
 		writeSyncError(writer, http.StatusBadRequest, err.Error())
 		return
 	}
+	if deps.ResetPlay != nil {
+		deps.ResetPlay()
+	}
 	writeSyncJSON(writer, http.StatusOK, map[string]bool{"ok": true})
 }
 

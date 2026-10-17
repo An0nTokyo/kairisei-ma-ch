@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"sync"
 
 	"kairisei.local/mserver/internal/addresses"
 	"kairisei.local/mserver/internal/deviceid"
@@ -65,6 +66,13 @@ func Start(dataDir string, portText string) (*Running, error) {
 		game:       game,
 		battle:     battle,
 	}
+	gate := &playGate{
+		store:      store,
+		dataDir:    dataDir,
+		deviceID:   deviceID,
+		baseURL:    running.BaseURL,
+		battlePort: running.BattlePort,
+	}
 	running.httpServer = &http.Server{
 		Handler: NewHandler(Deps{
 			Accounts:   store,
@@ -72,6 +80,8 @@ func Start(dataDir string, portText string) (*Running, error) {
 			DataDir:    dataDir,
 			GamePort:   gamePort,
 			Interfaces: currentInterfaces,
+			PlayNow:    gate.current,
+			ResetPlay:  gate.reset,
 		}),
 		ConnContext: func(ctx context.Context, conn net.Conn) context.Context {
 			tcp, ok := conn.LocalAddr().(*net.TCPAddr)
@@ -96,6 +106,39 @@ func (running *Running) Shutdown(ctx context.Context) error {
 		return battleErr
 	}
 	return storeErr
+}
+
+type playGate struct {
+	mu         sync.Mutex
+	play       *localcn.Play
+	failed     bool
+	store      *localcn.Store
+	dataDir    string
+	deviceID   string
+	baseURL    string
+	battlePort int
+}
+
+func (gate *playGate) current() *localcn.Play {
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	if gate.play != nil || gate.failed {
+		return gate.play
+	}
+	play, err := localcn.OpenPlayFromDir(gate.store, gate.dataDir, gate.deviceID, gate.baseURL, "127.0.0.1", gate.battlePort)
+	if err != nil {
+		gate.failed = true
+		return nil
+	}
+	gate.play = play
+	return play
+}
+
+func (gate *playGate) reset() {
+	gate.mu.Lock()
+	gate.play = nil
+	gate.failed = false
+	gate.mu.Unlock()
 }
 
 func currentInterfaces() ([]addresses.Interface, error) {

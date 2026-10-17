@@ -35,3 +35,35 @@ func WriteMasterFiles(dir string, cards, growth []byte) error {
 	}
 	return os.WriteFile(filepath.Join(masterDir, "growth.bin"), growth, 0o600)
 }
+
+func WriteExtraMasterFiles(dir string, files map[string][]byte) error {
+	if len(files) == 0 {
+		return nil
+	}
+	masterDir := filepath.Join(dir, "masters")
+	if err := os.MkdirAll(masterDir, 0o700); err != nil {
+		return err
+	}
+	for name, body := range files {
+		if _, ok := extraMasterNames[name]; !ok {
+			return errors.New("account master name is invalid")
+		}
+		if err := os.WriteFile(filepath.Join(masterDir, name), body, 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+var extraMasterNames = map[string]struct{}{
+	"explore.bin":     {},
+	"story.bin":       {},
+	"navi.bin":        {},
+	"items.bin":       {},
+	"avatar.bin":      {},
+	"stamps.bin":      {},
+	"honors.bin":      {},
+	"login-bonus.bin": {},
+	"battle.bin":      {},
+	"pvp.bin":         {},
+}

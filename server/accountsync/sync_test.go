@@ -29,7 +29,12 @@ func TestBorrowAndReturn(t *testing.T) {
 	if err := os.WriteFile(growthPath, []byte("growth-v1"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	handler := accountsync.Handler("secret", serverDB{store: serverStore, cardsPath: cardsPath, growthPath: growthPath})
+	handler := accountsync.Handler("secret", serverDB{
+		store:      serverStore,
+		cardsPath:  cardsPath,
+		growthPath: growthPath,
+		extra:      map[string][]byte{"explore.bin": []byte("explore-v1")},
+	})
 	remote := httptest.NewServer(handler)
 	t.Cleanup(remote.Close)
 	phone := phoneDB{store: phoneStore, dir: phoneDir}
@@ -70,6 +75,10 @@ func TestBorrowAndReturn(t *testing.T) {
 
 	if err := accountsync.Borrow(remote.URL, "secret", deviceID, userID, phone); err != nil {
 		t.Fatal(err)
+	}
+	explore, err := os.ReadFile(filepath.Join(phoneDir, "masters", "explore.bin"))
+	if err != nil || string(explore) != "explore-v1" {
+		t.Fatalf("explore master = %q %v", explore, err)
 	}
 	if _, found, err := phoneStore.FindLogin("00000000-0000-0000-0000-000000000099"); err != nil || !found {
 		t.Fatalf("phone login after borrow = %v found %v", err, found)
@@ -181,6 +190,7 @@ type serverDB struct {
 	store      *localcn.Store
 	cardsPath  string
 	growthPath string
+	extra      map[string][]byte
 }
 
 func (db serverDB) Holder(userID int) (accountsync.HolderView, error) {
@@ -217,6 +227,8 @@ func (db serverDB) MasterFiles() ([]byte, []byte, error) {
 	return cards, growth, nil
 }
 
+func (db serverDB) ExtraMasters() (map[string][]byte, error) { return db.extra, nil }
+
 type phoneDB struct {
 	store *localcn.Store
 	dir   string
@@ -250,6 +262,17 @@ func (phone phoneDB) ReadMasters() ([]byte, []byte, bool, error) {
 
 func (phone phoneDB) WriteMasters(cards, growth []byte) error {
 	return accountsync.WriteMasterFiles(phone.dir, cards, growth)
+}
+
+func (phone phoneDB) WriteExtraMasters(files map[string][]byte) error {
+	return accountsync.WriteExtraMasterFiles(phone.dir, files)
+}
+
+func TestExtraMasterNameIsRejected(t *testing.T) {
+	err := accountsync.WriteExtraMasterFiles(t.TempDir(), map[string][]byte{"../cards.bin": []byte("x")})
+	if err == nil || !strings.Contains(err.Error(), "invalid") {
+		t.Fatalf("error = %v", err)
+	}
 }
 
 func holderView(holder localcn.HolderView) accountsync.HolderView {
