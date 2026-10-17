@@ -18,6 +18,10 @@ func Return(baseURL, token, deviceID string, userID int, choice, dataDir string,
 	return accountsync.Return(baseURL, token, deviceID, userID, choice, phoneStore{store: store, dir: dataDir})
 }
 
+func List(baseURL, token, deviceID string) ([]accountsync.AccountBrief, error) {
+	return accountsync.ListAccounts(baseURL, token, deviceID)
+}
+
 func (phone phoneStore) EnsureLogin(userID int, loginUUID, session string) error {
 	return phone.store.EnsureLogin(userID, loginUUID, session)
 }
