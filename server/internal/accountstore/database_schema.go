@@ -30,6 +30,7 @@ var fixedStateTableColumns = map[string][]string{
 	"cn_friend_point_rental":    {"event_id", "event_key", "owner_user_id", "renter_user_id", "boss_id", "friend_point", "created_utc"},
 	"cn_local_account_follow":   {"follower_user_id", "followed_user_id", "created_utc"},
 	"cn_account_holder":         {"user_id", "holder_id", "checkout_revision", "master_digest", "frozen"},
+	"cn_account_held_mail":      {"user_id", "event_key", "reward_json"},
 }
 
 func validateFixedStateSchema(transaction *sql.Tx) error {
@@ -140,6 +141,9 @@ func initializeSaveSchema(transaction *sql.Tx) error {
 			return err
 		}
 		if _, err := transaction.Exec(accountHolderSchema); err != nil {
+			return err
+		}
+		if _, err := transaction.Exec(accountHeldMailSchema); err != nil {
 			return err
 		}
 		if _, err := transaction.Exec(partnerRecencyIndexes); err != nil {
@@ -285,6 +289,9 @@ func initializeSaveSchema(transaction *sql.Tx) error {
 	if _, err := transaction.Exec(accountHolderSchema); err != nil {
 		return err
 	}
+	if _, err := transaction.Exec(accountHeldMailSchema); err != nil {
+		return err
+	}
 	if _, err := transaction.Exec(partnerRecencyIndexes); err != nil {
 		return fmt.Errorf("create CN partner recency indexes: %w", err)
 	}
@@ -297,6 +304,13 @@ const accountHolderSchema = `CREATE TABLE IF NOT EXISTS cn_account_holder (
  checkout_revision INTEGER NOT NULL,
  master_digest TEXT NOT NULL,
  frozen INTEGER NOT NULL CHECK (frozen IN (0,1))
+)`
+
+const accountHeldMailSchema = `CREATE TABLE IF NOT EXISTS cn_account_held_mail (
+ user_id INTEGER NOT NULL,
+ event_key TEXT NOT NULL,
+ reward_json TEXT NOT NULL,
+ PRIMARY KEY(user_id, event_key)
 )`
 
 // Existing timestamp columns remain authoritative. These additive indexes also
