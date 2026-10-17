@@ -29,6 +29,7 @@ var fixedStateTableColumns = map[string][]string{
 	"cn_account_credentials":    {"user_id", "username", "password_salt", "password_hash", "iterations", "updated_utc"},
 	"cn_friend_point_rental":    {"event_id", "event_key", "owner_user_id", "renter_user_id", "boss_id", "friend_point", "created_utc"},
 	"cn_local_account_follow":   {"follower_user_id", "followed_user_id", "created_utc"},
+	"cn_account_holder":         {"user_id", "holder_id", "checkout_revision", "master_digest", "frozen"},
 }
 
 func validateFixedStateSchema(transaction *sql.Tx) error {
@@ -136,6 +137,9 @@ func initializeSaveSchema(transaction *sql.Tx) error {
 	}
 	if userVersion == SaveDatabaseSchemaVersion {
 		if _, err := transaction.Exec(battleClearStatisticsSchema); err != nil {
+			return err
+		}
+		if _, err := transaction.Exec(accountHolderSchema); err != nil {
 			return err
 		}
 		if _, err := transaction.Exec(partnerRecencyIndexes); err != nil {
@@ -278,11 +282,22 @@ func initializeSaveSchema(transaction *sql.Tx) error {
 	if _, err := transaction.Exec(battleClearStatisticsSchema); err != nil {
 		return err
 	}
+	if _, err := transaction.Exec(accountHolderSchema); err != nil {
+		return err
+	}
 	if _, err := transaction.Exec(partnerRecencyIndexes); err != nil {
 		return fmt.Errorf("create CN partner recency indexes: %w", err)
 	}
 	return validateFixedStateSchema(transaction)
 }
+
+const accountHolderSchema = `CREATE TABLE IF NOT EXISTS cn_account_holder (
+ user_id INTEGER PRIMARY KEY,
+ holder_id TEXT NOT NULL,
+ checkout_revision INTEGER NOT NULL,
+ master_digest TEXT NOT NULL,
+ frozen INTEGER NOT NULL CHECK (frozen IN (0,1))
+)`
 
 // Existing timestamp columns remain authoritative. These additive indexes also
 // handle RFC3339 fractional seconds correctly, without rewriting account rows.
