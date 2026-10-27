@@ -121,6 +121,31 @@ func TestPhoneSafeProfileAndPvpShowNotDegraded(t *testing.T) {
 	}
 }
 
+func TestPhoneSafePvpStartWithoutDefenseReturnsMinus1200(t *testing.T) {
+	store, userID, handler := openDefensePhone(t, false)
+	session := phoneSession(t, store, userID)
+	body := `{"type":0,"select_arthur_type":1,"pvp_my_deck":[]}`
+	response := postPhone(handler, "/PvpStart2", session+body)
+	if strings.Contains(response.Body.String(), degrade.Message) {
+		t.Fatalf("degraded: %s", response.Body.String())
+	}
+	common, _ := decodeCNPhoneSafe(t, response)
+	if common["res_code"] != float64(-1200) {
+		t.Fatalf("res_code=%v want -1200 body=%s", common["res_code"], response.Body.String())
+	}
+}
+
+func TestUnknownRouteStillDegraded(t *testing.T) {
+	store, userID, handler := openDefensePhone(t, false)
+	session := phoneSession(t, store, userID)
+	response := postPhone(handler, "/FriendSearchDefinitelyMissing", session+`{}`)
+	var payload map[string]any
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &payload) != nil ||
+		payload["res_code"] != float64(-1) || !strings.Contains(response.Body.String(), degrade.Message) {
+		t.Fatalf("want degrader, got %s", response.Body.String())
+	}
+}
+
 func mustJSON(t *testing.T, v any) []byte {
 	t.Helper()
 	b, err := json.Marshal(v)

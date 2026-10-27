@@ -168,22 +168,3 @@ func (app *application) registerSoloRoutes(router chi.Router) []string {
 	return paths
 }
 
-func (app *application) registerDefenseRoutes(router chi.Router) []string {
-	var paths []string
-	post := func(path string, handler http.HandlerFunc) {
-		paths = append(paths, path)
-		router.Post(path, handler)
-	}
-	post("/TeamBattleAIRoomCreate", cnBootstrapExactBusiness(
-		app.business,
-		"TeamBattleAIRoomCreate",
-		"/TeamBattleAIRoomCreate",
-		"bossid",
-		"ai_id",
-		"deck_arthur_type",
-		"deck_arthur_type_idx",
-		"use_punished_free_piont",
-	))
-	post("/PvpStart2", cnBootstrapExactBusiness(app.business, "PvpStart2", "/PvpStart2", "type", "select_arthur_type", "pvp_my_deck"))
-	return paths
-}

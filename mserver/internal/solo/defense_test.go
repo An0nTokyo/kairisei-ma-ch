@@ -18,23 +18,26 @@ import (
 	"kairisei.local/server/playtest"
 )
 
-func TestPvpWithoutDefenseDecksIsDegraded(t *testing.T) {
+func TestPvpWithoutDefenseDecksIsSoftRefused(t *testing.T) {
 	store, userID, handler := openDefensePhone(t, false)
-	before, err := store.SnapshotRevision(userID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	session := phoneSession(t, store, userID)
-	for _, path := range []string{"/PvpStart2", "/TeamBattleAIRoomCreate"} {
-		response := postPhone(handler, path, session+`{}`)
-		var payload map[string]any
-		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &payload) != nil || payload["res_code"] != float64(-1) || !strings.Contains(response.Body.String(), degrade.Message) {
-			t.Fatalf("%s status = %d body = %s", path, response.Code, response.Body.String())
-		}
+	response := postPhone(handler, "/PvpStart2", session+`{"type":0,"select_arthur_type":1,"pvp_my_deck":[]}`)
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), degrade.Message) {
+		t.Fatalf("pvp status = %d body = %s", response.Code, response.Body.String())
 	}
-	after, err := store.SnapshotRevision(userID)
-	if err != nil || after != before {
-		t.Fatalf("revision after degraded arena = %d want %d err %v", after, before, err)
+	lines := strings.Split(strings.TrimSpace(response.Body.String()), "\n")
+	var common map[string]any
+	if len(lines) < 1 || json.Unmarshal([]byte(lines[0]), &common) != nil || common["res_code"] != float64(-1200) {
+		t.Fatalf("want soft -1200, body = %s", response.Body.String())
+	}
+}
+
+func TestAIRoomAvailableWithoutDefenseDecks(t *testing.T) {
+	store, userID, handler := openDefensePhone(t, false)
+	session := phoneSession(t, store, userID)
+	response := postPhone(handler, "/TeamBattleAIRoomCreate", session+`{"bossid":1,"ai_id":1,"deck_arthur_type":1,"deck_arthur_type_idx":0,"use_punished_free_piont":0}`)
+	if strings.Contains(response.Body.String(), degrade.Message) || !strings.Contains(response.Body.String(), "unknown local AI room owner") {
+		t.Fatalf("ai room status = %d body = %s", response.Code, response.Body.String())
 	}
 }
 

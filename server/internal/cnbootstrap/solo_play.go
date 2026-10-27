@@ -152,9 +152,6 @@ func NewSoloPlay(accounts *accountstore.Accounts, config SoloPlayConfig) (*SoloP
 	paths := app.registerSoloRoutes(router)
 	paths = append(paths, app.registerMultiRoomRoutes(router)...)
 	paths = append(paths, app.registerPhoneSafeRoutes(router)...)
-	if opponents.ready {
-		paths = append(paths, app.registerDefenseRoutes(router)...)
-	}
 	battleServer, err := multiplayer.NewServer(hub, config.Logger)
 	if err != nil {
 		return nil, err

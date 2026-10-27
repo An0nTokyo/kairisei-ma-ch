@@ -80,10 +80,21 @@ func TestSoloRouteWritesAndFriendRouteDoesNot(t *testing.T) {
 		t.Fatalf("revision after home = %d before %d err %v body %s", after, before, err, home.Body.String())
 	}
 	friend := httptest.NewRecorder()
-	handler.ServeHTTP(friend, httptest.NewRequest(http.MethodPost, "/FriendSearch", strings.NewReader(session+`{}`)))
-	var payload map[string]any
-	if friend.Code != http.StatusOK || json.Unmarshal(friend.Body.Bytes(), &payload) != nil || payload["res_code"] != float64(-1) || !strings.Contains(friend.Body.String(), degrade.Message) {
+	handler.ServeHTTP(friend, httptest.NewRequest(http.MethodPost, "/FriendSearch", strings.NewReader(session+`{"inviteid":"x"}`)))
+	if friend.Code != http.StatusOK || strings.Contains(friend.Body.String(), degrade.Message) {
 		t.Fatalf("friend status = %d body = %s", friend.Code, friend.Body.String())
+	}
+	lines := strings.Split(strings.TrimSpace(friend.Body.String()), "\n")
+	var common, method map[string]any
+	if len(lines) < 2 || json.Unmarshal([]byte(lines[0]), &common) != nil || json.Unmarshal([]byte(lines[1]), &method) != nil {
+		t.Fatalf("friend body = %s", friend.Body.String())
+	}
+	if common["res_code"] != float64(0) {
+		t.Fatalf("friend res_code=%v body=%s", common["res_code"], friend.Body.String())
+	}
+	got, _ := json.Marshal(method["user"])
+	if string(got) != "[]" {
+		t.Fatalf("friend user=%s want []", got)
 	}
 	stayed, err := store.SnapshotRevision(userID)
 	if err != nil || stayed != after {

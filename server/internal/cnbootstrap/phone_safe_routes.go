@@ -23,7 +23,7 @@ func (app *application) registerPhoneSafeRoutes(router chi.Router) []string {
 	post("/PvpEnd", app.phoneSafePvpEnd)
 	post("/UserProfileShow", app.phoneSafeUserProfileShow)
 	post("/PvpShow", app.phoneSafePvpShow)
-	// Task 4 appends PvpStart2 here.
+	post("/PvpStart2", app.phoneSafePvpStart2)
 	return paths
 }
 
@@ -212,4 +212,29 @@ func (app *application) phoneSafePvpShow(writer http.ResponseWriter, request *ht
 		"result": 0, "pvp_point": point, "challenge": challenge,
 		"pvp_reset": map[string]any{"start_time": 0, "end_time": 0},
 	})
+}
+
+func (app *application) phoneSafePvpStart2(writer http.ResponseWriter, request *http.Request) {
+	payload, err := normalizeCNOptionalFields(request, "PvpStart2",
+		[]string{"type", "select_arthur_type", "pvp_my_deck"},
+		[]string{"type", "select_arthur_type", "pvp_my_deck"})
+	if err != nil {
+		http.Error(writer, err.Error(), http.StatusBadRequest)
+		return
+	}
+	recorder := httptest.NewRecorder()
+	forwardCNBusiness(
+		recorder,
+		adaptCNBusinessRequest(request, http.MethodPost, "/PvpStart2", payload),
+		app.business,
+		func(content []byte) ([]byte, error) { return content, nil },
+	)
+	if code, ok := phoneSafeForwardResCode(recorder); ok && (code == 0 || code == -1200) {
+		writePhoneSafeRecorder(writer, recorder)
+		return
+	}
+	commonOut := cnBootstrapCommon()
+	commonOut["res_code"] = -1200
+	commonOut["res_str"] = "暂无可用的本地竞技场对手，请在其他玩家建立卡组后重试。"
+	writeCNProtocolResponseWithPopup(writer, commonOut, map[string]any{})
 }
