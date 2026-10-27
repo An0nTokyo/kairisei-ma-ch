@@ -97,6 +97,7 @@ func NewHandler(deps Deps) http.Handler {
 	mux.Handle("POST /local/launcher/borrow", accountSync)
 	mux.Handle("POST /local/launcher/return", accountSync)
 	mux.Handle("POST /local/launcher/accounts", accountSync)
+	mux.Handle("POST /local/launcher/banners", accountSync)
 	mux.Handle("/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		play := deps.currentPlay()
 		if solo.Dispatch(play, writer, request) {

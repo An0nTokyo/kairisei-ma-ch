@@ -55,6 +55,29 @@ func serveAccountSync(deps Deps, writer http.ResponseWriter, request *http.Reque
 		writeSyncJSON(writer, http.StatusOK, map[string]any{"accounts": accounts})
 		return
 	}
+	if request.URL.Path == "/local/launcher/banners" {
+		if !syncHostOK(payload.Host) || payload.Port < 1 || payload.Port > 65535 || payload.Token == "" {
+			writeSyncError(writer, http.StatusBadRequest, "account sync body is invalid")
+			return
+		}
+		baseURL := "http://" + net.JoinHostPort(payload.Host, strconv.Itoa(payload.Port))
+		files, missing, err := sync.FetchBanners(baseURL, payload.Token)
+		if err != nil {
+			writeSyncError(writer, http.StatusBadRequest, err.Error())
+			return
+		}
+		converted := make([]bannerSyncFile, 0, len(files))
+		for _, file := range files {
+			converted = append(converted, bannerSyncFile{Path: file.Path, SHA256: file.SHA256, Bytes: file.Bytes})
+		}
+		synced, err := writeBannerFiles(bannerRoot(deps.DataDir), converted)
+		if err != nil {
+			writeSyncError(writer, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeSyncJSON(writer, http.StatusOK, map[string]any{"synced": synced, "missing": missing})
+		return
+	}
 	if !syncHostOK(payload.Host) || payload.Port < 1 || payload.Port > 65535 || payload.UserID < 1000001 || payload.Token == "" {
 		writeSyncError(writer, http.StatusBadRequest, "account sync body is invalid")
 		return
