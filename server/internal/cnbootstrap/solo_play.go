@@ -19,75 +19,92 @@ import (
 )
 
 type SoloPlayConfig struct {
-	DeviceID     string
-	BaseURL      string
-	Logger       *slog.Logger
-	Masters      MastersConfig
-	BattleSV     multiplayer.Endpoint
-	DefenseDecks []byte
+	DeviceID          string
+	BaseURL           string
+	Logger            *slog.Logger
+	Masters           MastersConfig
+	BattleSV          multiplayer.Endpoint
+	DefenseDecks      []byte
+	CombatCardMaster  string
+	CombatMasterRoot  string
 }
 
-func NewSoloPlay(accounts *accountstore.Accounts, config SoloPlayConfig) (http.Handler, []string, error) {
+type SoloPlay struct {
+	Handler      http.Handler
+	Paths        []string
+	BattleServer *multiplayer.Server
+}
+
+func NewSoloPlay(accounts *accountstore.Accounts, config SoloPlayConfig) (*SoloPlay, error) {
 	if accounts == nil {
-		return nil, nil, fmt.Errorf("CN solo play accounts are required")
+		return nil, fmt.Errorf("CN solo play accounts are required")
 	}
 	if config.Logger == nil {
 		config.Logger = slog.New(slog.DiscardHandler)
 	}
 	if config.BaseURL == "" {
-		return nil, nil, fmt.Errorf("CN solo play base URL is required")
+		return nil, fmt.Errorf("CN solo play base URL is required")
 	}
 	if config.DeviceID == "" {
-		return nil, nil, fmt.Errorf("CN solo play device is required")
+		return nil, fmt.Errorf("CN solo play device is required")
 	}
 	bundles, err := avatarBundles(config.Masters.Avatar)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	var pvpConfig game.PVPConfig
 	if config.Masters.PVP != "" {
 		pvpConfig, err = masterdata.LoadPVPRuntimeMaster(config.Masters.PVP)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 	playerProgression, err := masterdata.LoadPlayerProgressionRuntimeMaster(config.Masters.PlayerProgression)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	loginBonus, err := masterdata.LoadLoginBonusRuntimeMaster(config.Masters.LoginBonus)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	prepare, err := loadCNRuntimeStatePreparer(config.Masters, pvpConfig, playerProgression, loginBonus, bundles, config.Logger)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	catalog, err := accountstore.LoadSaveState(accounts.Database().SeedPath())
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	catalog, err = prepare(catalog)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	accounts.Database().SetCatalog(catalog)
 	hub := multiplayer.NewHub()
 	if err := hub.AttachCompletionRepository(accounts); err != nil {
-		return nil, nil, err
+		return nil, err
+	}
+	if config.CombatCardMaster != "" && config.CombatMasterRoot != "" {
+		combatCatalog, err := multiplayer.LoadCombatCatalog(config.CombatCardMaster, config.CombatMasterRoot)
+		if err != nil {
+			return nil, err
+		}
+		if err := hub.AttachCombatCatalog(combatCatalog); err != nil {
+			return nil, err
+		}
 	}
 	operations, err := adminapi.NewOperations(accounts.Database(), catalog.Gachas)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if err := hub.AttachGameSpeed(operations.TeamBattleSpeed); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if err := operations.InitializeContent(catalog, config.Masters.Battle); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if err := operations.InitializePlayerPolicy(catalog, config.Masters.Navi); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	basePrepare := prepare
 	prepare = func(state gamestate.State) (gamestate.State, error) {
@@ -99,11 +116,11 @@ func NewSoloPlay(accounts *accountstore.Accounts, config SoloPlayConfig) (http.H
 	}
 	cacheLimit, err := accounthttp.ConfiguredAccountCacheLimit()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	opponents, err := frozenPVPOpponents(config.DefenseDecks)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	business := accounthttp.New(accounthttp.Config{
 		IdleLimit:     cacheLimit,
@@ -133,10 +150,16 @@ func NewSoloPlay(accounts *accountstore.Accounts, config SoloPlayConfig) (http.H
 	router.Use(authenticateCNSessions(accounts))
 	router.Use(requirePhoneHolder(accounts, config.DeviceID))
 	paths := app.registerSoloRoutes(router)
+	paths = append(paths, app.registerMultiRoomRoutes(router)...)
+	paths = append(paths, app.registerPhoneSafeRoutes(router)...)
 	if opponents.ready {
 		paths = append(paths, app.registerDefenseRoutes(router)...)
 	}
-	return router, paths, nil
+	battleServer, err := multiplayer.NewServer(hub, config.Logger)
+	if err != nil {
+		return nil, err
+	}
+	return &SoloPlay{Handler: router, Paths: paths, BattleServer: battleServer}, nil
 }
 
 type frozenOpponentSource struct {
