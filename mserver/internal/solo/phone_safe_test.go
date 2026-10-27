@@ -41,6 +41,54 @@ func TestPhoneSafeFriendListsAreEmptyNotDegraded(t *testing.T) {
 	}
 }
 
+func TestPhoneSafeFollowAndPvpEndDoNotMutate(t *testing.T) {
+	store, userID, handler := openDefensePhone(t, false)
+	session := phoneSession(t, store, userID)
+	before, err := store.SnapshotRevision(userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	add := postPhone(handler, "/FollowAdd", session+`{"userids":[1000002,0,0,0,0,0,0,0,0,0]}`)
+	if strings.Contains(add.Body.String(), degrade.Message) {
+		t.Fatalf("FollowAdd degraded: %s", add.Body.String())
+	}
+	common, method := decodeCNPhoneSafe(t, add)
+	if common["res_code"] != float64(0) {
+		t.Fatalf("FollowAdd res_code=%v", common["res_code"])
+	}
+	if string(mustJSON(t, method["request_userids"])) != "[]" || method["is_friend_full"] != float64(0) {
+		t.Fatalf("FollowAdd method=%v", method)
+	}
+	un := postPhone(handler, "/FollowUnFollow", session+`{"userid":1000002}`)
+	common, _ = decodeCNPhoneSafe(t, un)
+	if common["res_code"] != float64(0) || strings.Contains(un.Body.String(), degrade.Message) {
+		t.Fatalf("FollowUnFollow=%s", un.Body.String())
+	}
+	end := postPhone(handler, "/PvpEnd", session+`{"btluid":1,"is_win":0,"is_retire":1,"input_cmd":[""]}`)
+	common, method = decodeCNPhoneSafe(t, end)
+	if common["res_code"] != float64(0) || strings.Contains(end.Body.String(), degrade.Message) {
+		t.Fatalf("PvpEnd=%s", end.Body.String())
+	}
+	bf, _ := method["bf_pvp_point"].(float64)
+	af, _ := method["af_pvp_point"].(float64)
+	if bf != af {
+		t.Fatalf("PvpEnd changed points bf=%v af=%v", bf, af)
+	}
+	after, err := store.SnapshotRevision(userID)
+	if err != nil || after != before {
+		t.Fatalf("revision %d -> %d", before, after)
+	}
+}
+
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
 func decodeCNPhoneSafe(t *testing.T, response *httptest.ResponseRecorder) (map[string]any, map[string]any) {
 	t.Helper()
 	if response.Code != http.StatusOK {
