@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -38,7 +39,14 @@ func FetchBanners(baseURL, token string) ([]BannerFile, int, error) {
 		if json.Unmarshal(payload, &decoded) == nil && decoded.Error != "" {
 			return nil, 0, errors.New(decoded.Error)
 		}
-		return nil, 0, errors.New("banner sync failed")
+		snippet := strings.TrimSpace(string(payload))
+		if len(snippet) > 120 {
+			snippet = snippet[:120]
+		}
+		if snippet == "" {
+			return nil, 0, errors.New("banner sync failed: HTTP " + strconv.Itoa(response.StatusCode))
+		}
+		return nil, 0, errors.New("banner sync failed: HTTP " + strconv.Itoa(response.StatusCode) + " " + snippet)
 	}
 	var body struct {
 		Files   []BannerFile `json:"files"`

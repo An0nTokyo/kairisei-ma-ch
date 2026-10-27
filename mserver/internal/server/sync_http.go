@@ -63,6 +63,7 @@ func serveAccountSync(deps Deps, writer http.ResponseWriter, request *http.Reque
 		baseURL := "http://" + net.JoinHostPort(payload.Host, strconv.Itoa(payload.Port))
 		files, missing, err := sync.FetchBanners(baseURL, payload.Token)
 		if err != nil {
+			writeSyncLog("同步图片失败: " + err.Error())
 			writeSyncError(writer, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -72,8 +73,14 @@ func serveAccountSync(deps Deps, writer http.ResponseWriter, request *http.Reque
 		}
 		synced, err := writeBannerFiles(bannerRoot(deps.DataDir), converted)
 		if err != nil {
+			writeSyncLog("同步图片失败: " + err.Error())
 			writeSyncError(writer, http.StatusBadRequest, err.Error())
 			return
+		}
+		if missing > 0 {
+			writeSyncLog(fmt.Sprintf("同步图片 %d 张，缺 %d 张", synced, missing))
+		} else {
+			writeSyncLog(fmt.Sprintf("同步图片 %d 张", synced))
 		}
 		writeSyncJSON(writer, http.StatusOK, map[string]any{"synced": synced, "missing": missing})
 		return
