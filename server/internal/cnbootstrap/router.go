@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -128,6 +129,10 @@ func (app *application) router() chi.Router {
 		} {
 			router.Post(path, http.HandlerFunc(syncHandler.ServeHTTP))
 		}
+		router.Get("/local/sync/banners", func(writer http.ResponseWriter, request *http.Request) {
+			files, missing := accountsync.BuildBannerFiles(bannerSourcesFromResources(app.resources))
+			accountsync.BannersHandler(app.config.SyncToken, files, missing).ServeHTTP(writer, request)
+		})
 	}
 	router.Post("/subcribe_push.php", cnBootstrapPushRegistration)
 	app.registerGameRoutes(router)
@@ -184,14 +189,17 @@ func (app *application) maintenanceRequests(next http.Handler) http.Handler {
 }
 
 func (app *application) handler() (http.Handler, error) {
+	phase := time.Now()
 	adminHandler, err := adminapi.New(adminapi.Config{
 		Accounts: app.accounts, Runtime: app.business, Operations: app.operations,
 		BattleMaster: app.config.Masters.Battle, CardMaster: app.config.Masters.Cards, ItemMaster: app.config.Masters.Items,
 		Multiplayer: app.config.Multiplayer, AdvertiseHost: app.config.Network.AdvertiseHost, GamePort: app.config.Network.HTTPPort,
 		Logger: app.config.Logger, Progression: app.progression,
 		GachaBanners: app.resources.GachaBanners, AssetMaps: []string{app.config.Resources.AssetMap},
+		AssetNames:    app.resources.AssetNames,
 		GachaCoverDir: app.gachaCoverDir(),
 	})
+	logStartupPhase(app.config.Logger, "admin_handler", phase)
 	if err != nil {
 		return nil, fmt.Errorf("initialize CN admin handler: %w", err)
 	}
