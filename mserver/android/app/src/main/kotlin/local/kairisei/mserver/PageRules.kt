@@ -77,3 +77,13 @@ object TransferRequest {
         return TransferBody(computer, port, secret)
     }
 }
+
+object BannerSyncStatus {
+    fun of(code: Int, synced: Int, missing: Int, error: String): String {
+        if (code !in 200..299) {
+            return if (error.isNotEmpty()) "同步图片失败: $error" else "同步图片失败"
+        }
+        if (missing > 0) return "已同步 ${synced} 张，缺 ${missing} 张"
+        return "已同步 ${synced} 张"
+    }
+}

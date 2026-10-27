@@ -29,6 +29,7 @@ class TransferActivity : Activity() {
     private lateinit var listScroll: ScrollView
     private lateinit var listRows: LinearLayout
     private lateinit var refreshButton: Button
+    private lateinit var syncBannersButton: Button
     private lateinit var actionButton: Button
     private lateinit var noteView: TextView
     private lateinit var choiceLine: TextView
@@ -85,6 +86,10 @@ class TransferActivity : Activity() {
             text = "刷新"
             setOnClickListener { fetchList(false) }
         }
+        syncBannersButton = Button(this).apply {
+            text = "同步图片"
+            setOnClickListener { syncBanners() }
+        }
         actionButton = Button(this)
         noteView = TextView(this)
         choiceLine = TextView(this)
@@ -107,6 +112,7 @@ class TransferActivity : Activity() {
             addView(remotePortField)
             addView(TextView(this@TransferActivity).apply { text = "同步口令" })
             addView(tokenField)
+            addView(syncBannersButton)
             addView(searchField)
             addView(listScroll)
             addView(actionButton)
@@ -228,6 +234,49 @@ class TransferActivity : Activity() {
         fetchList(true)
     }
 
+    private fun syncBanners() {
+        if (busy) return
+        val target = TransferRequest.body(
+            hostField.text.toString(),
+            remotePortField.text.toString(),
+            tokenField.text.toString(),
+        )
+        if (target == null) {
+            failLocal("电脑地址、端口或口令无效")
+            return
+        }
+        val localPort = PortText.parse(readText("server-port")) ?: run {
+            failLocal("没有连上本机服务")
+            return
+        }
+        val body = JSONObject()
+            .put("host", target.host)
+            .put("port", target.port)
+            .put("token", target.token)
+            .toString()
+        busy = true
+        renderAction()
+        Thread {
+            val result = runCatching {
+                SyncClient.post(localPort, "/local/launcher/banners", body)
+            }.getOrNull()
+            handler.post { applyBannerSync(result) }
+        }.start()
+    }
+
+    private fun applyBannerSync(result: SyncClient.Response?) {
+        busy = false
+        if (result == null) {
+            failLocal("没有连上本机服务")
+            return
+        }
+        val json = runCatching { JSONObject(result.body) }.getOrNull()
+        val synced = json?.optInt("synced") ?: 0
+        val missing = json?.optInt("missing") ?: 0
+        statusView.text = BannerSyncStatus.of(result.code, synced, missing, result.error)
+        renderAction()
+    }
+
     private fun fetchList(keepStatus: Boolean) {
         if (busy) return
         val target = TransferRequest.body(
@@ -325,6 +374,7 @@ class TransferActivity : Activity() {
     }
 
     private fun renderAction() {
+        syncBannersButton.isEnabled = !busy
         val action = TransferAction.of(selectedVisible())
         actionButton.text = action.text
         actionButton.isEnabled = action.enabled && !busy

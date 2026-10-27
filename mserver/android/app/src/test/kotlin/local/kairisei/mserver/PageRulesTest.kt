@@ -77,4 +77,12 @@ class PageRulesTest {
         assertEquals(26020, body?.port)
         assertEquals("secret", body?.token)
     }
+
+    @Test
+    fun bannerSyncStatusCopy() {
+        assertEquals("同步图片失败: nope", BannerSyncStatus.of(400, 0, 0, "nope"))
+        assertEquals("同步图片失败", BannerSyncStatus.of(500, 0, 0, ""))
+        assertEquals("已同步 3 张", BannerSyncStatus.of(200, 3, 0, ""))
+        assertEquals("已同步 2 张，缺 1 张", BannerSyncStatus.of(200, 2, 1, ""))
+    }
 }
