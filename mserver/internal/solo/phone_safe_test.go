@@ -2,6 +2,7 @@ package solo_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -77,6 +78,46 @@ func TestPhoneSafeFollowAndPvpEndDoNotMutate(t *testing.T) {
 	after, err := store.SnapshotRevision(userID)
 	if err != nil || after != before {
 		t.Fatalf("revision %d -> %d", before, after)
+	}
+}
+
+func TestPhoneSafeProfileAndPvpShowNotDegraded(t *testing.T) {
+	store, userID, handler := openDefensePhone(t, false)
+	session := phoneSession(t, store, userID)
+	self := postPhone(handler, "/UserProfileShow", session+fmt.Sprintf(`{"userid":%d}`, userID))
+	if strings.Contains(self.Body.String(), degrade.Message) {
+		t.Fatalf("self profile degraded: %s", self.Body.String())
+	}
+	common, method := decodeCNPhoneSafe(t, self)
+	if common["res_code"] != float64(0) {
+		t.Fatalf("self profile res_code=%v body=%s", common["res_code"], self.Body.String())
+	}
+	if _, ok := method["profile"]; !ok {
+		t.Fatalf("self profile missing: %v", method)
+	}
+	other := postPhone(handler, "/UserProfileShow", session+`{"userid":1999999}`)
+	if strings.Contains(other.Body.String(), degrade.Message) {
+		t.Fatalf("other profile degraded: %s", other.Body.String())
+	}
+	common, method = decodeCNPhoneSafe(t, other)
+	if common["res_code"] != float64(0) {
+		t.Fatalf("other profile res_code=%v body=%s", common["res_code"], other.Body.String())
+	}
+	if _, ok := method["profile"]; !ok {
+		t.Fatalf("other profile missing: %v", method)
+	}
+	show := postPhone(handler, "/PvpShow", session)
+	if strings.Contains(show.Body.String(), degrade.Message) {
+		t.Fatalf("PvpShow degraded: %s", show.Body.String())
+	}
+	common, method = decodeCNPhoneSafe(t, show)
+	if common["res_code"] != float64(0) {
+		t.Fatalf("PvpShow res_code=%v body=%s", common["res_code"], show.Body.String())
+	}
+	for _, key := range []string{"result", "pvp_point", "challenge", "pvp_reset"} {
+		if _, ok := method[key]; !ok {
+			t.Fatalf("PvpShow missing %s: %v", key, method)
+		}
 	}
 }
 
