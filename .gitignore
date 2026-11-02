@@ -31,5 +31,6 @@
 /deployment.json
 __pycache__/
 *.py[cod]
+/tools/boss-catalog-out/
 .DS_Store
 Thumbs.db
