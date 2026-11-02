@@ -18,6 +18,16 @@ var cn602IntroPlaceholderPNG = func() []byte {
 	return content
 }()
 
+func WriteProducts(writer http.ResponseWriter, request *http.Request) {
+	cnBootstrapProducts(writer, request)
+}
+
+func WritePlaceholderPNG(writer http.ResponseWriter, _ *http.Request) {
+	writer.Header().Set("Content-Type", "image/png")
+	writer.Header().Set("Cache-Control", "no-store")
+	_, _ = writer.Write(cn602IntroPlaceholderPNG)
+}
+
 func cnBootstrapProducts(writer http.ResponseWriter, _ *http.Request) {
 	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	writer.Header().Set("Cache-Control", "no-store")

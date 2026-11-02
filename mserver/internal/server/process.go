@@ -23,6 +23,7 @@ type Running struct {
 	DeviceID   string
 	BaseURL    string
 
+	mu         sync.Mutex
 	store      *localcn.Store
 	game       net.Listener
 	battle     net.Listener
@@ -72,6 +73,7 @@ func Start(dataDir string, portText string) (*Running, error) {
 		deviceID:   deviceID,
 		baseURL:    running.BaseURL,
 		battlePort: running.BattlePort,
+		running:    running,
 	}
 	running.httpServer = &http.Server{
 		Handler: NewHandler(Deps{
@@ -97,7 +99,10 @@ func Start(dataDir string, portText string) (*Running, error) {
 
 func (running *Running) Shutdown(ctx context.Context) error {
 	err := running.httpServer.Shutdown(ctx)
-	battleErr := running.battle.Close()
+	running.mu.Lock()
+	battle := running.battle
+	running.mu.Unlock()
+	battleErr := battle.Close()
 	storeErr := running.store.Close()
 	if err != nil {
 		return err
@@ -117,6 +122,7 @@ type playGate struct {
 	deviceID   string
 	baseURL    string
 	battlePort int
+	running    *Running
 }
 
 func (gate *playGate) current() *localcn.Play {
@@ -128,7 +134,16 @@ func (gate *playGate) current() *localcn.Play {
 	play, err := localcn.OpenPlayFromDir(gate.store, gate.dataDir, gate.deviceID, gate.baseURL, "127.0.0.1", gate.battlePort)
 	if err != nil {
 		gate.failed = true
+		// #region agent log
+		routeLog(gate.dataDir, "play", err.Error(), true)
+		// #endregion
 		return nil
+	}
+	if play.BattleServer != nil {
+		gate.running.mu.Lock()
+		listener := gate.running.battle
+		gate.running.mu.Unlock()
+		go func() { _ = play.BattleServer.Serve(listener) }()
 	}
 	gate.play = play
 	return play
@@ -136,9 +151,20 @@ func (gate *playGate) current() *localcn.Play {
 
 func (gate *playGate) reset() {
 	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	if gate.play != nil && gate.play.BattleServer != nil {
+		_ = gate.play.BattleServer.Close()
+	}
+	gate.running.mu.Lock()
+	old := gate.running.battle
+	addr := old.Addr().String()
+	_ = old.Close()
+	if next, err := net.Listen("tcp", addr); err == nil {
+		gate.running.battle = next
+	}
+	gate.running.mu.Unlock()
 	gate.play = nil
 	gate.failed = false
-	gate.mu.Unlock()
 }
 
 func currentInterfaces() ([]addresses.Interface, error) {

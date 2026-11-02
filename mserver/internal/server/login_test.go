@@ -169,6 +169,23 @@ func playerCount(t *testing.T, store *localcn.Store) int {
 	return count
 }
 
+func TestModuleSwitchAcceptsDoubledSlash(t *testing.T) {
+	handler := NewHandler(Deps{})
+	request := httptest.NewRequest(http.MethodPost, "http://local//mods_switch.php", strings.NewReader(`{"clver":"6.0.7"}`))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || strings.Contains(response.Body.String(), degrade.Message) {
+		t.Fatalf("status = %d body = %s", response.Code, response.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["res_code"] != float64(0) || payload["mods_state"] == nil {
+		t.Fatalf("payload = %#v", payload)
+	}
+}
+
 func sessionOf(t *testing.T, store *localcn.Store) string {
 	t.Helper()
 	session, err := store.SessionKey(1000002)

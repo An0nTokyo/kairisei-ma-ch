@@ -4,7 +4,9 @@ import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -19,10 +21,15 @@ import android.widget.ScrollView
 import android.widget.TextView
 import org.json.JSONArray
 import java.io.File
+import java.net.NetworkInterface
 import java.net.URL
 import java.nio.charset.StandardCharsets
 
 class MainActivity : Activity() {
+    private companion object {
+        private const val NOTIFICATION_REQUEST = 1
+    }
+
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var statusView: TextView
     private lateinit var portField: EditText
@@ -112,7 +119,7 @@ class MainActivity : Activity() {
             addressesReady = false
             File(filesDir, "server.log").writeText("")
             File(filesDir, "server-error").delete()
-            startForegroundService(Intent(this, ServerService::class.java))
+            startServer()
             render()
         }
         writingPort = true
@@ -122,7 +129,23 @@ class MainActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
+        val active = running()
+        if (active) startServer()
         handler.post(refresh)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == NOTIFICATION_REQUEST && running()) startForegroundService(Intent(this, ServerService::class.java))
+    }
+
+    private fun startServer() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), NOTIFICATION_REQUEST)
+        }
+        startForegroundService(Intent(this, ServerService::class.java))
     }
 
     override fun onStop() {
@@ -153,7 +176,8 @@ class MainActivity : Activity() {
                 if (!running()) return@post
                 if (body != null && runCatching { JSONArray(body) }.isSuccess) {
                     addressesReady = true
-                    showAddresses(body, port)
+                    val local = runCatching { localAddresses() }.getOrDefault(emptyList())
+                    if (local.isNotEmpty()) showAddressRows(local, port) else showAddresses(body, port)
                     val started = HomeState.of(true, true)
                     statusView.text = started.status
                     statusView.setTextColor(statusColor(started.status))
@@ -166,24 +190,41 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    private fun localAddresses(): List<Pair<String, String>> {
+        val nics = NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
+        val raw = nics.flatMap { nic ->
+            val up = runCatching { nic.isUp }.getOrDefault(false)
+            nic.inetAddresses.toList().map { addr -> RawNic(nic.name, up, addr.hostAddress ?: "") }
+        }
+        return usableAddresses(raw)
+    }
+
+    private fun showAddressRows(rows: List<Pair<String, String>>, port: Int) {
+        addressList.removeAllViews()
+        for ((label, host) in rows) addAddressButton(AddressLine.of(label, host, port))
+    }
+
     private fun showAddresses(body: String, port: Int) {
         addressList.removeAllViews()
         val rows = runCatching { JSONArray(body) }.getOrNull() ?: return
         for (index in 0 until rows.length()) {
             val row = rows.getJSONObject(index)
-            val line = AddressLine.of(row.getString("label"), row.getString("host"), port)
-            addressList.addView(Button(this).apply {
-                text = line.title + "\n" + line.copyText
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                )
-                setOnClickListener {
-                    val clipboard = getSystemService(ClipboardManager::class.java)
-                    clipboard.setPrimaryClip(ClipData.newPlainText("server", line.copyText))
-                }
-            })
+            addAddressButton(AddressLine.of(row.getString("label"), row.getString("host"), port))
         }
+    }
+
+    private fun addAddressButton(line: AddressLine) {
+        addressList.addView(Button(this).apply {
+            text = line.title + "\n" + line.copyText
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            )
+            setOnClickListener {
+                val clipboard = getSystemService(ClipboardManager::class.java)
+                clipboard.setPrimaryClip(ClipData.newPlainText("server", line.copyText))
+            }
+        })
     }
 
     private fun statusColor(status: String): Int {

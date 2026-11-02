@@ -25,6 +25,12 @@ android {
     }
 
     sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/seedAssets"))
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
 val stageSeed = tasks.register<Copy>("stageSeed") {
