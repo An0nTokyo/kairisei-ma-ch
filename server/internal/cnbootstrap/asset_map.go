@@ -216,35 +216,6 @@ func loadCNAssetMap(
 	return assets, bundleMetadata, nil
 }
 
-func loadCNAssetMapBundleSet(assetMapPath string) (map[string]struct{}, error) {
-	contents, err := os.ReadFile(assetMapPath)
-	if err != nil {
-		return nil, fmt.Errorf("read CN asset map bundle set: %w", err)
-	}
-	var manifest struct {
-		Bundles []struct {
-			Bundle string `json:"bundle"`
-		} `json:"bundles"`
-	}
-	if err := json.Unmarshal(contents, &manifest); err != nil {
-		return nil, fmt.Errorf("parse CN asset map bundle set: %w", err)
-	}
-	if len(manifest.Bundles) == 0 {
-		return nil, errors.New("CN asset map bundle set is empty")
-	}
-	result := make(map[string]struct{}, len(manifest.Bundles))
-	for index, bundle := range manifest.Bundles {
-		if bundle.Bundle == "" {
-			return nil, fmt.Errorf("CN asset map bundle set entry %d is empty", index)
-		}
-		if _, duplicate := result[bundle.Bundle]; duplicate {
-			return nil, fmt.Errorf("CN asset map bundle set repeats %q", bundle.Bundle)
-		}
-		result[bundle.Bundle] = struct{}{}
-	}
-	return result, nil
-}
-
 func validateCNAssetMapEntry(entry cnAssetMapEntry, availableBundles map[string]struct{}) error {
 	if entry.Directory != "" {
 		if path.Clean(entry.Directory) != entry.Directory || path.IsAbs(entry.Directory) || strings.HasPrefix(entry.Directory, "../") {

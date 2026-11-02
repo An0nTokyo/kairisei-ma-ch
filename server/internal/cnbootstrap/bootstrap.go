@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"kairisei.local/server/internal/accounthttp"
 	"kairisei.local/server/internal/accountstore"
@@ -71,11 +72,22 @@ func assembleApplication(config Config) (*application, error) {
 	if config.Network.HTTPPort < 1 || config.Network.HTTPPort > 65535 {
 		return nil, errors.New("port must be 1 through 65535")
 	}
-	resources, err := loadClientResources(config.Resources)
+	phase := time.Now()
+	cacheDir := ""
+	if config.Persistence.SavePath != "" {
+		cacheDir = filepath.Join(filepath.Dir(config.Persistence.SavePath), "client-resource-cache")
+	}
+	resources, cacheState, err := loadClientResources(config.Resources, cacheDir)
+	if cacheState == "" {
+		cacheState = "miss"
+	}
+	logStartupPhase(config.Logger, "client_resources", phase, "cache", cacheState)
 	if err != nil {
 		return nil, err
 	}
+	phase = time.Now()
 	saveDatabase, err := accountstore.OpenDatabase(config.Persistence.SavePath, config.Persistence.SeedPath, config.Logger)
+	logStartupPhase(config.Logger, "open_database", phase)
 	if err != nil {
 		return nil, err
 	}
@@ -85,35 +97,46 @@ func assembleApplication(config Config) (*application, error) {
 			_ = saveDatabase.Close()
 		}
 	}()
+	phase = time.Now()
 	var pvpConfig game.PVPConfig
 	if config.Masters.PVP != "" {
 		pvpConfig, err = masterdata.LoadPVPRuntimeMaster(config.Masters.PVP)
 		if err != nil {
+			logStartupPhase(config.Logger, "policy_masters", phase)
 			return nil, err
 		}
 	}
 	playerProgression, err := masterdata.LoadPlayerProgressionRuntimeMaster(config.Masters.PlayerProgression)
 	if err != nil {
+		logStartupPhase(config.Logger, "policy_masters", phase)
 		return nil, err
 	}
 	loginBonusPolicy, err := masterdata.LoadLoginBonusRuntimeMaster(config.Masters.LoginBonus)
 	if err != nil {
+		logStartupPhase(config.Logger, "policy_masters", phase)
 		return nil, err
 	}
 	catalog, err := accountstore.LoadSaveState(config.Persistence.SeedPath)
+	logStartupPhase(config.Logger, "policy_masters", phase)
 	if err != nil {
 		return nil, err
 	}
-	prepareRuntimeState, err := loadCNRuntimeStatePreparer(config.Masters, pvpConfig, playerProgression, loginBonusPolicy, resources.AvailableBundles)
+	phase = time.Now()
+	prepareRuntimeState, err := loadCNRuntimeStatePreparer(config.Masters, pvpConfig, playerProgression, loginBonusPolicy, resources.AvailableBundles, config.Logger)
+	logStartupPhase(config.Logger, "runtime_masters", phase)
 	if err != nil {
 		return nil, err
 	}
+	phase = time.Now()
 	catalog, err = prepareRuntimeState(catalog)
+	logStartupPhase(config.Logger, "apply_seed_catalog", phase)
 	if err != nil {
 		return nil, err
 	}
 	saveDatabase.SetCatalog(catalog)
+	phase = time.Now()
 	primaryState, err := saveDatabase.LoadOrImport()
+	logStartupPhase(config.Logger, "load_save", phase)
 	if err != nil {
 		return nil, err
 	}
@@ -131,12 +154,16 @@ func assembleApplication(config Config) (*application, error) {
 	if err := config.Multiplayer.AttachGameSpeed(operationStore.TeamBattleSpeed); err != nil {
 		return nil, err
 	}
+	phase = time.Now()
 	if err := operationStore.InitializeContent(catalog, config.Masters.Battle); err != nil {
+		logStartupPhase(config.Logger, "operations_init", phase)
 		return nil, err
 	}
 	if err := operationStore.InitializePlayerPolicy(catalog, config.Masters.Navi); err != nil {
+		logStartupPhase(config.Logger, "operations_init", phase)
 		return nil, err
 	}
+	logStartupPhase(config.Logger, "operations_init", phase)
 	basePreparer := prepareRuntimeState
 	prepareRuntimeState = func(state gamestate.State) (gamestate.State, error) {
 		prepared, err := basePreparer(state)
@@ -163,7 +190,9 @@ func assembleApplication(config Config) (*application, error) {
 	if err != nil {
 		return nil, err
 	}
+	phase = time.Now()
 	primaryBusinessHandler, err := buildBusinessHandler(accountstore.PrimaryUserID, primaryState)
+	logStartupPhase(config.Logger, "primary_account", phase)
 	if err != nil {
 		return nil, err
 	}
@@ -210,4 +239,14 @@ func assembleApplication(config Config) (*application, error) {
 	}
 	assembled = true
 	return app, nil
+}
+
+func logStartupPhase(logger *slog.Logger, phase string, started time.Time, extra ...any) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	args := make([]any, 0, 4+len(extra))
+	args = append(args, "phase", phase, "elapsed_ms", time.Since(started).Milliseconds())
+	args = append(args, extra...)
+	logger.Info("startup phase", args...)
 }

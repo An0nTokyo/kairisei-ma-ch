@@ -42,6 +42,9 @@ type Config struct {
 	Progression   gamestate.PlayerProgressionPolicy
 	GachaBanners  map[string]string
 	AssetMaps     []string
+	// AssetNames is the lowercase catalog asset name set already parsed while
+	// building the client catalog. When set, admin startup does not read the asset map again.
+	AssetNames map[string]bool
 	// GachaCoverDir is the writable folder for uploaded pool covers (next to the save database).
 	GachaCoverDir string
 }
@@ -209,7 +212,7 @@ func New(config Config) (http.Handler, error) {
 	}
 	var cardResources map[int]adminCardResource
 	if len(config.AssetMaps) > 0 {
-		cardResources, err = loadAdminCardResources(cardMaster, config.CardMaster, config.AssetMaps[0])
+		cardResources, err = loadAdminCardResources(cardMaster, config.CardMaster, config.AssetMaps[0], config.AssetNames)
 		if err != nil {
 			return nil, err
 		}

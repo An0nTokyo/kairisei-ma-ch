@@ -31,58 +31,76 @@ type cardImages struct {
 	Files     map[string]cardImage
 }
 
+type cardImageStamp struct {
+	Path        string
+	Bytes       int64
+	SHA256      string
+	Size        int64
+	ModUnixNano int64
+}
+
 func loadCardImages(root string) (cardImages, error) {
+	images, _, err := inspectCardImages(root)
+	return images, err
+}
+
+func inspectCardImages(root string) (cardImages, []cardImageStamp, error) {
 	result := cardImages{Files: make(map[string]cardImage)}
 	if root == "" {
-		return result, fmt.Errorf("card image root is required")
+		return result, nil, fmt.Errorf("card image root is required")
 	}
 	metadata := filepath.Join(root, "manifest.json")
 	info, err := os.Stat(metadata)
 	if err != nil {
-		return result, err
+		return result, nil, err
 	}
 	if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > 8<<20 {
-		return result, fmt.Errorf("invalid card image manifest size")
+		return result, nil, fmt.Errorf("invalid card image manifest size")
 	}
 	content, err := os.ReadFile(metadata)
 	if err != nil {
-		return result, err
+		return result, nil, err
 	}
 	var manifest struct {
 		SchemaVersion int         `json:"schema_version"`
 		Files         []cardImage `json:"files"`
 	}
 	if err := json.Unmarshal(content, &manifest); err != nil {
-		return result, err
+		return result, nil, err
 	}
 	if manifest.SchemaVersion != 1 || len(manifest.Files) == 0 {
-		return result, fmt.Errorf("invalid card image manifest")
+		return result, nil, fmt.Errorf("invalid card image manifest")
 	}
+	stamps := make([]cardImageStamp, 0, len(manifest.Files))
 	for _, file := range manifest.Files {
 		_, duplicate := result.Files[file.Path]
 		digest, err := hex.DecodeString(file.SHA256)
 		if duplicate || !cardImagePath.MatchString(file.Path) || err != nil || len(digest) != sha256.Size || file.Bytes <= 0 || file.Bytes > 32<<20 {
-			return result, fmt.Errorf("invalid card image identity: %s", file.Path)
+			return result, nil, fmt.Errorf("invalid card image identity: %s", file.Path)
 		}
 		file.SourcePath, err = cdnSourcePath(root, file.Path)
 		if err != nil {
-			return result, err
+			return result, nil, err
 		}
 		stream, err := os.Open(file.SourcePath)
 		if err != nil {
-			return result, err
+			return result, nil, err
 		}
 		info, statErr := stream.Stat()
 		config, decodeErr := png.DecodeConfig(stream)
 		_ = stream.Close()
 		if statErr != nil || !info.Mode().IsRegular() || info.Size() != file.Bytes || decodeErr != nil || config.Width <= 0 || config.Height <= 0 || config.Width > 8192 || config.Height > 8192 {
-			return result, fmt.Errorf("invalid card image payload: %s", file.Path)
+			return result, nil, fmt.Errorf("invalid card image payload: %s", file.Path)
 		}
 		result.Files[file.Path] = file
+		stamps = append(stamps, cardImageStamp{
+			Path: file.Path, Bytes: file.Bytes, SHA256: file.SHA256,
+			Size: info.Size(), ModUnixNano: info.ModTime().UnixNano(),
+		})
 	}
 	digest := sha256.Sum256(content)
 	result.Namespace = hex.EncodeToString(digest[:16])
-	return result, nil
+	return result, stamps, nil
 }
 
 func (images cardImages) serveHTTP(writer http.ResponseWriter, request *http.Request) {

@@ -212,8 +212,10 @@ func run(arguments []string, logger *slog.Logger) error {
 	var multiplayerHub *multiplayer.Hub
 	var battleServer *multiplayer.Server
 	var err error
+	var startupStarted time.Time
 	switch opts.clientProfile {
 	case "cn602-bootstrap":
+		startupStarted = time.Now()
 		if opts.cnBattleMasterPath == "" {
 			return errors.New("-cn-battle-master is required for cn602-bootstrap")
 		}
@@ -232,7 +234,9 @@ func run(arguments []string, logger *slog.Logger) error {
 		if opts.cnGachaBannerPath == "" || opts.cnFiveStarGachaBannerPath == "" || opts.cnHomeBannerPath == "" {
 			return errors.New("-cn-gacha-banner, -cn-five-star-gacha-banner and -cn-home-banner are required for cn602-bootstrap")
 		}
+		phase := time.Now()
 		combatCatalog, catalogErr := multiplayer.LoadCombatCatalog(opts.cnCombatCardPath, opts.cnCombatMasterRoot)
+		logStartupPhase(logger, "combat_catalog", phase)
 		if catalogErr != nil {
 			return fmt.Errorf("load CN combat catalog: %w", catalogErr)
 		}
@@ -242,6 +246,7 @@ func run(arguments []string, logger *slog.Logger) error {
 		}
 		battleServer, err = multiplayer.NewServer(multiplayerHub, logger)
 		if err == nil {
+			phase = time.Now()
 			handler, err = cnbootstrap.New(cnbootstrap.Config{
 				Persistence: cnbootstrap.PersistenceConfig{
 					RequestLog: opts.requestLog,
@@ -282,6 +287,7 @@ func run(arguments []string, logger *slog.Logger) error {
 				Logger:      logger,
 				SyncToken:   opts.accountSyncToken,
 			})
+			logStartupPhase(logger, "cn_bootstrap", phase)
 		}
 	default:
 		return fmt.Errorf("unsupported client profile %q", opts.clientProfile)
@@ -289,6 +295,7 @@ func run(arguments []string, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	listenStarted := time.Now()
 
 	if closer, ok := handler.(io.Closer); ok {
 		defer func() {
@@ -342,6 +349,10 @@ func run(arguments []string, logger *slog.Logger) error {
 	if adminListener != nil {
 		attributes = append(attributes, "admin_listen", adminListener.Addr().String())
 	}
+	logStartupPhase(logger, "listen", listenStarted)
+	if !startupStarted.IsZero() {
+		attributes = append(attributes, "startup_ms", time.Since(startupStarted).Milliseconds())
+	}
 	logger.Info("server ready", attributes...)
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
@@ -371,6 +382,7 @@ func run(arguments []string, logger *slog.Logger) error {
 		draining.Wait()
 		logger.Info("server stopped; active operations drained")
 	}
+
 	select {
 	case <-requested:
 		shutdown()
@@ -400,4 +412,8 @@ func run(arguments []string, logger *slog.Logger) error {
 		}
 		return serveErr
 	}
+}
+
+func logStartupPhase(logger *slog.Logger, phase string, started time.Time) {
+	logger.Info("startup phase", "phase", phase, "elapsed_ms", time.Since(started).Milliseconds())
 }

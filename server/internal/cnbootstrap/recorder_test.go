@@ -60,6 +60,17 @@ func TestRecorderSkipsBulkResourcesAndDoesNotBlockOnCaptureFailure(t *testing.T)
 		t.Fatalf("bulk request was captured: %q", content)
 	}
 
+	syncBody := strings.Repeat("a", maxCapturedBody+1)
+	syncResponse := httptest.NewRecorder()
+	bulk.ServeHTTP(syncResponse, httptest.NewRequest(
+		http.MethodPost,
+		"http://local/local/sync/return",
+		strings.NewReader(syncBody),
+	))
+	if syncResponse.Code != http.StatusNoContent {
+		t.Fatalf("account sync status = %d, body = %q", syncResponse.Code, syncResponse.Body.String())
+	}
+
 	broken := (&recorder{path: filepath.Join(t.TempDir(), "missing", "requests.jsonl")}).middleware(logger)(next)
 	brokenResponse := httptest.NewRecorder()
 	broken.ServeHTTP(brokenResponse, httptest.NewRequest(

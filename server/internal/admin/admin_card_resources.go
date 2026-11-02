@@ -25,7 +25,7 @@ type adminCardResource struct {
 
 // Catalog visibility and gameplay resource closure are separate from the
 // loopback-only thumbnail manifest. Recovered cards may have no web thumbnail.
-func loadAdminCardResources(master masterdata.CardRuntimeMaster, masterPath, assetMapPath string) (map[int]adminCardResource, error) {
+func loadAdminCardResources(master masterdata.CardRuntimeMaster, masterPath, assetMapPath string, knownNames map[string]bool) (map[int]adminCardResource, error) {
 	var provenance struct {
 		Files []struct {
 			Path   string `json:"path"`
@@ -50,22 +50,25 @@ func loadAdminCardResources(master masterdata.CardRuntimeMaster, masterPath, ass
 	if !verified {
 		return nil, errors.New("admin card source differs from the runtime master receipt")
 	}
-	file, err := os.Open(assetMapPath)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	var assets struct {
-		CatalogAssets []struct {
-			Name string `json:"name"`
-		} `json:"catalog_assets"`
-	}
-	if err := json.NewDecoder(io.LimitReader(file, 128*1024*1024)).Decode(&assets); err != nil {
-		return nil, err
-	}
-	names := make(map[string]bool, len(assets.CatalogAssets))
-	for _, asset := range assets.CatalogAssets {
-		names[strings.ToLower(asset.Name)] = true
+	names := knownNames
+	if names == nil {
+		file, err := os.Open(assetMapPath)
+		if err != nil {
+			return nil, err
+		}
+		defer file.Close()
+		var assets struct {
+			CatalogAssets []struct {
+				Name string `json:"name"`
+			} `json:"catalog_assets"`
+		}
+		if err := json.NewDecoder(io.LimitReader(file, 128*1024*1024)).Decode(&assets); err != nil {
+			return nil, err
+		}
+		names = make(map[string]bool, len(assets.CatalogAssets))
+		for _, asset := range assets.CatalogAssets {
+			names[strings.ToLower(asset.Name)] = true
+		}
 	}
 	lines := bufio.NewScanner(strings.NewReader(strings.TrimPrefix(string(content), "\ufeff")))
 	lines.Buffer(make([]byte, 4096), 4*1024*1024)

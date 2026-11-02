@@ -2,8 +2,10 @@ package cnbootstrap
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"path/filepath"
+	"time"
 
 	"kairisei.local/server/internal/accountstore"
 	"kairisei.local/server/internal/game"
@@ -13,43 +15,61 @@ import (
 )
 
 // loadCNRuntimeStatePreparer reads immutable master data once per server.
-func loadCNRuntimeStatePreparer(masters MastersConfig, pvpConfig game.PVPConfig, playerProgression gamestate.PlayerProgressionPolicy, loginBonusPolicy gamestate.LoginBonusPolicy, availableBundles map[string]struct{}) (func(gamestate.State) (gamestate.State, error), error) {
+func loadCNRuntimeStatePreparer(masters MastersConfig, pvpConfig game.PVPConfig, playerProgression gamestate.PlayerProgressionPolicy, loginBonusPolicy gamestate.LoginBonusPolicy, availableBundles map[string]struct{}, logger *slog.Logger) (func(gamestate.State) (gamestate.State, error), error) {
+	phase := time.Now()
 	cardMaster, err := masterdata.LoadCardRuntimeMaster(masters.Cards)
+	logStartupPhase(logger, "master_cards", phase)
 	if err != nil {
 		return nil, err
 	}
+	phase = time.Now()
 	exploreMaster, err := masterdata.LoadExploreRuntimeMaster(masters.Explore)
+	logStartupPhase(logger, "master_explore", phase)
 	if err != nil {
 		return nil, err
 	}
+	phase = time.Now()
 	storyMaster, err := masterdata.LoadStoryRuntimeMaster(masters.Story)
+	logStartupPhase(logger, "master_story", phase)
 	if err != nil {
 		return nil, err
 	}
+	phase = time.Now()
 	naviMaster, err := masterdata.LoadNaviRuntimeMaster(masters.Navi)
+	logStartupPhase(logger, "master_navi", phase)
 	if err != nil {
 		return nil, err
 	}
+	phase = time.Now()
 	itemMaster, err := masterdata.LoadItemRuntimeMaster(masters.Items)
+	logStartupPhase(logger, "master_items", phase)
 	if err != nil {
 		return nil, err
 	}
+	phase = time.Now()
 	avatarMaster, err := masterdata.LoadAvatarRuntimeMaster(masters.Avatar)
+	logStartupPhase(logger, "master_avatar", phase)
 	if err != nil {
 		return nil, err
 	}
+	phase = time.Now()
 	stampMaster, err := masterdata.LoadStampRuntimeMaster(masters.Stamps)
+	logStartupPhase(logger, "master_stamps", phase)
 	if err != nil {
 		return nil, err
 	}
+	phase = time.Now()
 	honorMaster, err := masterdata.LoadHonorRuntimeMaster(masters.Honors)
+	logStartupPhase(logger, "master_honors", phase)
 	if err != nil {
 		return nil, err
 	}
 	var battleMaster masterdata.BattleRuntimeMaster
 	var normalQuestMaster masterdata.NormalQuestRuntimeMaster
 	if masters.Battle != "" {
+		phase = time.Now()
 		battleMaster, err = masterdata.LoadBattleRuntimeMaster(masters.Battle)
+		logStartupPhase(logger, "master_battle", phase)
 		if err != nil {
 			return nil, err
 		}
@@ -57,7 +77,9 @@ func loadCNRuntimeStatePreparer(masters MastersConfig, pvpConfig game.PVPConfig,
 			filepath.Dir(masters.Battle),
 			"cn602-normal-quest-runtime.json",
 		)
+		phase = time.Now()
 		normalQuestMaster, err = masterdata.LoadNormalQuestRuntimeMaster(normalQuestMasterPath)
+		logStartupPhase(logger, "master_normal_quest", phase)
 		if err != nil {
 			return nil, err
 		}
@@ -132,11 +154,15 @@ func newCNBusinessHandler(config httpapi.Config, prepareRuntimeState func(gamest
 	if err != nil {
 		return nil, fmt.Errorf("encode CN runtime state before master application: %w", err)
 	}
+	phase := time.Now()
 	runtimeState, err = prepareRuntimeState(runtimeState)
+	logStartupPhase(config.Logger, "apply_account_masters", phase)
 	if err != nil {
 		return nil, err
 	}
+	phase = time.Now()
 	contentGate, err := validateCNRunnableContent(runtimeState)
+	logStartupPhase(config.Logger, "content_gate", phase)
 	if err != nil {
 		return nil, fmt.Errorf("validate CN runtime content gate: %w", err)
 	}
@@ -145,9 +171,12 @@ func newCNBusinessHandler(config httpapi.Config, prepareRuntimeState func(gamest
 		return nil, fmt.Errorf("encode CN runtime state after master application: %w", err)
 	}
 	if stateBefore != stateAfter {
+		phase = time.Now()
 		if err := config.PersistState(runtimeState); err != nil {
+			logStartupPhase(config.Logger, "persist_migrated_state", phase)
 			return nil, fmt.Errorf("persist validated CN runtime state migration: %w", err)
 		}
+		logStartupPhase(config.Logger, "persist_migrated_state", phase)
 	}
 	config.Logger.Info(
 		"validated CN runtime content gate",
@@ -174,7 +203,10 @@ func newCNBusinessHandler(config httpapi.Config, prepareRuntimeState func(gamest
 	runtimeState.CatalogVersion = cn602CatalogVersion
 	runtimeState.State = "LOCAL"
 	config.InitialState = runtimeState
-	return httpapi.New(config)
+	phase = time.Now()
+	handler, err := httpapi.New(config)
+	logStartupPhase(config.Logger, "build_http_handler", phase)
+	return handler, err
 }
 
 func normalizeCN602StampDeck(state *gamestate.State) bool {

@@ -38,7 +38,7 @@ type recorder struct {
 func (r *recorder) middleware(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-			if request.URL.Path != "/healthz" && !isBulkResourceRequest(request) {
+			if request.URL.Path != "/healthz" && !isBulkResourceRequest(request) && !isAccountSyncRequest(request) {
 				body, err := io.ReadAll(io.LimitReader(request.Body, maxCapturedBody+1))
 				if err != nil {
 					http.Error(writer, "request body read failed", http.StatusBadRequest)
@@ -117,6 +117,11 @@ func (r *recorder) append(entry capture) error {
 	// the handle preserves normal-process durability without blocking every client
 	// request on a physical-disk flush.
 	return file.Close()
+}
+
+func isAccountSyncRequest(request *http.Request) bool {
+	path := "/" + strings.TrimLeft(request.URL.Path, "/")
+	return strings.HasPrefix(path, "/local/sync/")
 }
 
 func isBulkResourceRequest(request *http.Request) bool {

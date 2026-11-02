@@ -14,23 +14,28 @@ import (
 )
 
 func findCNPatchFile(patchRoots []string, relative string) (os.FileInfo, error) {
+	info, _, err := locateCNPatchFile(patchRoots, relative)
+	return info, err
+}
+
+func locateCNPatchFile(patchRoots []string, relative string) (os.FileInfo, string, error) {
 	for _, root := range patchRoots {
 		info, err := os.Stat(filepath.Join(root, filepath.FromSlash(relative)))
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		if !info.Mode().IsRegular() || info.Size() <= 0 {
-			return nil, fmt.Errorf("official CN bundle %q is not a non-empty file", relative)
+			return nil, "", fmt.Errorf("official CN bundle %q is not a non-empty file", relative)
 		}
 		// Match both select_bundle in the generator and serveCNPatchFile:
 		// earlier roots own duplicate paths, including different-sized official
 		// variants. A shadowed copy must not change the catalog's selected size.
-		return info, nil
+		return info, root, nil
 	}
-	return nil, os.ErrNotExist
+	return nil, "", os.ErrNotExist
 }
 
 func cnBootstrapPatchFile(patchRoots []string) http.HandlerFunc {

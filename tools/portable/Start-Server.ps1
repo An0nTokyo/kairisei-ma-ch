@@ -10,7 +10,7 @@ param(
     [int]$Port = 26020,
 
     [ValidateRange(5, 120)]
-    [int]$ReadinessTimeoutSeconds = 60,
+    [int]$ReadinessTimeoutSeconds = 90,
 
     [switch]$DryRun,
 
@@ -269,6 +269,7 @@ Add-NativeArgument -List $arguments -Name '-port' -Value ([string]$Port)
 Add-NativeArgument -List $arguments -Name '-battle-port' -Value ([string]$battlePort)
 Add-NativeArgument -List $arguments -Name '-admin-listen-host' -Value '127.0.0.1'
 Add-NativeArgument -List $arguments -Name '-admin-port' -Value ([string]$adminPort)
+Add-NativeArgument -List $arguments -Name '-account-sync-token' -Value '633456'
 $shutdownEvent = 'Local\Kairisei-' + [Guid]::NewGuid().ToString('N')
 Add-NativeArgument -List $arguments -Name '-shutdown-event' -Value $shutdownEvent
 

@@ -37,6 +37,14 @@ var cn602GachaBannerFiles = map[string]string{
 	"lucky_bag_yalin":       "https___ma43_gdl_netease_com_web_netease_GONGGAO_20180409_shuijing_fudaina_png",
 }
 
+func HomeEventBannerFileName() string {
+	return cn602HomeEventBannerFile
+}
+
+func ResolveGachaBannerPaths(defaultPath string, fiveStarPath string) (map[string]string, error) {
+	return resolveCN602GachaBannerPaths(defaultPath, fiveStarPath)
+}
+
 func resolveCN602GachaBannerPaths(defaultPath string, fiveStarPath string) (map[string]string, error) {
 	result := map[string]string{"five_star_ticket": fiveStarPath}
 	root := filepath.Dir(defaultPath)

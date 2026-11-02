@@ -124,7 +124,30 @@ func BuildCN602CatalogForAudit(patchRoots []string, assetMapPath string) ([]byte
 	return buildCN602Catalog(resolved, assetMapPath)
 }
 
+type cnCatalogBuild struct {
+	Content          []byte
+	AvailableBundles map[string]struct{}
+	AssetNames       map[string]bool
+	Bundles          []cnBundleStamp
+}
+
+type cnBundleStamp struct {
+	Name        string
+	Present     bool
+	Size        int64
+	ModUnixNano int64
+	Root        string
+}
+
 func buildCN602Catalog(patchRoots []string, assetMapPath string) ([]byte, error) {
+	built, err := buildCN602CatalogSet(patchRoots, assetMapPath)
+	if err != nil {
+		return nil, err
+	}
+	return built.Content, nil
+}
+
+func buildCN602CatalogSet(patchRoots []string, assetMapPath string) (*cnCatalogBuild, error) {
 	versionBytes, err := os.ReadFile(filepath.Join(patchRoots[0], "version.dat"))
 	if err != nil {
 		return nil, fmt.Errorf("read official CN version.dat: %w", err)
@@ -148,6 +171,7 @@ func buildCN602Catalog(patchRoots []string, assetMapPath string) ([]byte, error)
 	bundleCount := 0
 	availableBundles := make(map[string]struct{})
 	bundleRows := make([]cnCatalogBundleRow, 0)
+	bundleStamps := make([]cnBundleStamp, 0)
 	for _, row := range rows {
 		if len(row) == 2 && strings.TrimSpace(row[0]) == "<version>" {
 			version, parseErr := strconv.Atoi(strings.TrimSpace(row[1]))
@@ -169,8 +193,9 @@ func buildCN602Catalog(patchRoots []string, assetMapPath string) ([]byte, error)
 		if _, parseErr := strconv.ParseUint(patchCRC, 16, 32); parseErr != nil {
 			return nil, fmt.Errorf("invalid official CN bundle CRC %q for %q", patchCRC, bundleName)
 		}
-		bundleInfo, statErr := findCNPatchFile(patchRoots, bundleName)
+		bundleInfo, bundleRoot, statErr := locateCNPatchFile(patchRoots, bundleName)
 		if errors.Is(statErr, os.ErrNotExist) {
+			bundleStamps = append(bundleStamps, cnBundleStamp{Name: bundleName})
 			continue
 		}
 		if statErr != nil {
@@ -179,6 +204,10 @@ func buildCN602Catalog(patchRoots []string, assetMapPath string) ([]byte, error)
 		if !bundleInfo.Mode().IsRegular() || bundleInfo.Size() <= 0 {
 			return nil, fmt.Errorf("official CN bundle %q is not a non-empty file", bundleName)
 		}
+		bundleStamps = append(bundleStamps, cnBundleStamp{
+			Name: bundleName, Present: true, Size: bundleInfo.Size(),
+			ModUnixNano: bundleInfo.ModTime().UnixNano(), Root: bundleRoot,
+		})
 		bundleRows = append(bundleRows, cnCatalogBundleRow{
 			name:     bundleName,
 			patchCRC: patchCRC,
@@ -266,7 +295,16 @@ func buildCN602Catalog(patchRoots []string, assetMapPath string) ([]byte, error)
 	if writeErr != nil || closeErr != nil {
 		return nil, errors.New("compress CN catalog")
 	}
-	return compressed.Bytes(), nil
+	assetNames := make(map[string]bool, len(assetMap))
+	for _, asset := range assetMap {
+		assetNames[strings.ToLower(asset.name)] = true
+	}
+	return &cnCatalogBuild{
+		Content:          compressed.Bytes(),
+		AvailableBundles: availableBundles,
+		AssetNames:       assetNames,
+		Bundles:          bundleStamps,
+	}, nil
 }
 
 type cnCatalogBundleAsset struct {
