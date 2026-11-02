@@ -6,7 +6,6 @@ using System.IO;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
@@ -29,18 +28,25 @@ namespace KairiseiLauncher
         private readonly JavaScriptSerializer serializer = new JavaScriptSerializer();
         private readonly Timer timer = new Timer();
         private readonly ToolTip toolTip = new ToolTip();
-        private readonly ThemeCaptionHost captionHost;
         private readonly LauncherTray tray = new LauncherTray();
-        private ComboBox mode;
-        private ComboBox address;
-        private NumericUpDown port;
+        private PlainSelect mode;
+        private PlainAddress address;
+        private PlainPort port;
         private Label stateBadge;
         private Label endpoints;
         private TextBox activity;
         private Button powerButton;
         private Button adminButton;
+        private Button logsButton;
+        private Button restoreButton;
         private Button clientThemeButton;
         private Label questionMark;
+        private PictureBox iconBox;
+        private TableLayoutPanel connectionCard;
+        private FlowLayoutPanel addressHead;
+        private TableLayoutPanel addressRow;
+        private Panel logHost;
+        private readonly System.Collections.Generic.List<Label> mutedLabels = new System.Collections.Generic.List<Label>();
         private string packagedHost = "10.0.2.2";
         private int packagedPort = 26020;
         private bool validationOnly;
@@ -66,10 +72,6 @@ namespace KairiseiLauncher
             themeChoice = preferences.Theme;
             resolved = ThemeRules.Resolve(themeChoice, ReadAppsUseLightTheme());
             palette = ThemePalette.For(resolved);
-            captionHost = new ThemeCaptionHost(CycleTheme, PaintThemeGlyph);
-            toolTip.SetToolTip(captionHost, ThemeRules.Caption(themeChoice));
-            captionHost.MouseEnter += delegate { toolTip.Show(ThemeRules.Caption(themeChoice), captionHost, 0, captionHost.Height + 2, 4000); };
-            captionHost.MouseLeave += delegate { toolTip.Hide(captionHost); };
             tray.ShowMain += delegate { ShowFromTray(); };
             tray.ExitRequested += delegate { BeginForcedExit(); };
             SystemEvents.SessionEnding += OnSessionEnding;
@@ -79,7 +81,6 @@ namespace KairiseiLauncher
             HandleCreated += delegate
             {
                 TitleBarTheme.Apply(Handle, resolved);
-                PlaceThemeButton();
                 SingleInstance.Listen(delegate
                 {
                     if (IsHandleCreated) BeginInvoke(new Action(ShowFromTray));
@@ -88,7 +89,6 @@ namespace KairiseiLauncher
             };
             Shown += async delegate
             {
-                PlaceThemeButton();
                 PopulateAddresses();
                 await RefreshStatus(true);
                 if (IsDisposed || Disposing) return;
@@ -96,8 +96,6 @@ namespace KairiseiLauncher
                 timer.Tick += async delegate { await RefreshStatus(false); };
                 timer.Start();
             };
-            Move += delegate { PlaceThemeButton(); };
-            Resize += delegate { PlaceThemeButton(); };
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
@@ -140,7 +138,6 @@ namespace KairiseiLauncher
         {
             SystemEvents.SessionEnding -= OnSessionEnding;
             timer.Stop();
-            if (captionHost != null) captionHost.Hide();
             tray.Dispose();
             base.OnFormClosed(e);
         }
@@ -159,7 +156,7 @@ namespace KairiseiLauncher
             if (outcome == CloseOutcome.ShowPrompt)
             {
                 if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
-                using (var prompt = new ClosePromptForm())
+                using (var prompt = new ClosePromptForm(palette))
                 {
                     if (prompt.ShowDialog(this) != DialogResult.OK) return;
                     var remembered = ClosePolicy.Remembered(prompt.MinimizeToTray, prompt.Remember);
@@ -189,7 +186,6 @@ namespace KairiseiLauncher
                 allowExit = true;
                 Close();
             }
-            else if (outcome == CloseOutcome.ExitAfterStop) ExitAfterStop();
             else if (outcome == CloseOutcome.StayBecauseBusy)
             {
                 ShowFromTray();
@@ -197,53 +193,8 @@ namespace KairiseiLauncher
             }
         }
 
-        private async void ExitAfterStop()
-        {
-            if (operationKind != OperationKind.None)
-            {
-                ShowFromTray();
-                ShowFailure("另一项服务操作正在执行，请稍候。");
-                return;
-            }
-            operationKind = OperationKind.Stop;
-            busy = true;
-            ApplyState(latestState, false);
-            try
-            {
-                var result = await controller.StopAsync();
-                if (IsDisposed || Disposing) return;
-                if (result.exit_code == 0)
-                {
-                    allowExit = true;
-                    Close();
-                    return;
-                }
-                var text = String.IsNullOrWhiteSpace(result.output) ? "操作失败，退出码 " + result.exit_code : result.output.Trim();
-                ShowFromTray();
-                ShowFailure(text + "\r\n日志：" + result.diagnostic_path);
-            }
-            catch (Exception ex)
-            {
-                if (!IsDisposed && !Disposing)
-                {
-                    ShowFromTray();
-                    ShowFailure(ex.Message);
-                }
-            }
-            finally
-            {
-                if (!allowExit)
-                {
-                    busy = false;
-                    operationKind = OperationKind.None;
-                }
-            }
-            if (!allowExit && !IsDisposed && !Disposing) await RefreshStatus(false);
-        }
-
         private void HideToTray()
         {
-            if (captionHost != null) captionHost.Hide();
             Hide();
             ShowInTaskbar = false;
             tray.Show(Icon != null ? Icon : SystemIcons.Application);
@@ -256,7 +207,6 @@ namespace KairiseiLauncher
             if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
             Activate();
             tray.Hide();
-            PlaceThemeButton();
         }
 
         private void BuildUI()
@@ -267,7 +217,8 @@ namespace KairiseiLauncher
             MinimumSize = new Size(476, 700);
             Font = new Font("Microsoft YaHei UI", 10F);
             AutoScaleMode = AutoScaleMode.None;
-            try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
+            try { Icon = LoadWindowIcon(); } catch { Icon = SystemIcons.Application; }
+            if (Icon == null) Icon = SystemIcons.Application;
 
             var layout = new TableLayoutPanel
             {
@@ -285,37 +236,34 @@ namespace KairiseiLauncher
             Controls.Add(layout);
 
             var header = new Panel { Dock = DockStyle.Fill };
-            var iconBox = new PictureBox { Location = new Point(0, 8), Size = new Size(48, 48), SizeMode = PictureBoxSizeMode.Zoom };
-            try { iconBox.Image = Icon.ToBitmap(); } catch { }
+            iconBox = new PictureBox { Location = new Point(0, 8), Size = new Size(42, 42), SizeMode = PictureBoxSizeMode.Zoom };
+            iconBox.Image = Icon.ToBitmap();
+            iconBox.Resize += delegate { RoundControl(iconBox, 8); };
             header.Controls.Add(iconBox);
             header.Controls.Add(new Label
             {
                 Text = "乖离性百万亚瑟王",
-                Location = new Point(60, 4),
+                Location = new Point(56, 2),
                 AutoSize = true,
-                Font = new Font("Microsoft YaHei UI", 16F, FontStyle.Bold)
+                Font = new Font("Microsoft YaHei UI", 15F, FontStyle.Bold)
             });
             stateBadge = new Label
             {
                 Text = "● 检测中",
                 AutoSize = true,
-                Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold)
+                Padding = new Padding(10, 3, 10, 3),
+                Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold)
             };
             header.Controls.Add(stateBadge);
-            header.Controls.Add(new Label
-            {
-                Text = "国服本地服务 · Windows x64",
-                Location = new Point(60, 36),
-                AutoSize = true
-            });
+            header.Controls.Add(MakeMuted("国服本地服务 · Windows x64", new Point(56, 32)));
             var sourceLink = new LinkLabel
             {
                 Text = "本项目永久免费 · 从 GitHub 获取",
-                Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold),
+                Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Bold),
                 LinkColor = Color.FromArgb(220, 91, 48),
                 ActiveLinkColor = Color.FromArgb(222, 78, 78),
                 AutoSize = true,
-                Location = new Point(60, 62)
+                Location = new Point(56, 54)
             };
             sourceLink.LinkClicked += delegate
             {
@@ -326,109 +274,92 @@ namespace KairiseiLauncher
                 catch (Exception ex) { ShowFailure("打开项目主页失败：" + ex.Message); }
             };
             header.Controls.Add(sourceLink);
-            clientThemeButton = new Button
-            {
-                Size = new Size(16, 16),
-                FlatStyle = FlatStyle.Flat,
-                TabStop = false
-            };
-            clientThemeButton.FlatAppearance.BorderSize = 0;
-            clientThemeButton.Click += delegate { CycleTheme(); };
-            clientThemeButton.Paint += delegate(object sender, PaintEventArgs args) { PaintThemeGlyph(args.Graphics, clientThemeButton.ClientRectangle); };
-            header.Controls.Add(clientThemeButton);
-            toolTip.SetToolTip(clientThemeButton, ThemeRules.Caption(themeChoice));
             header.Resize += delegate { PlaceHeaderChrome(header); };
             layout.Controls.Add(header, 0, 0);
 
-            var connection = new TableLayoutPanel
+            connectionCard = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
                 AutoSize = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
                 ColumnCount = 1,
-                Margin = new Padding(0, 0, 0, 8)
+                Padding = new Padding(12, 10, 12, 12),
+                Margin = new Padding(0, 4, 0, 12)
             };
-            connection.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            connection.Controls.Add(MakeLabel("使用场景", 0, 0), 0, 0);
-            mode = new ComboBox
+            connectionCard.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            connectionCard.Resize += delegate { RoundControl(connectionCard, 10); };
+            connectionCard.Controls.Add(MakeMuted("使用场景"), 0, 0);
+            mode = new PlainSelect
             {
-                DropDownStyle = ComboBoxStyle.DropDownList,
                 Dock = DockStyle.Fill,
-                Margin = new Padding(0, 2, 0, 8)
+                Margin = new Padding(0, 2, 0, 10)
             };
             mode.Items.AddRange(new object[] { "Android 模拟器", "局域网", "公网 IP / 域名" });
             mode.SelectedIndex = 0;
             mode.SelectedIndexChanged += delegate { ApplyMode(); };
-            connection.Controls.Add(mode, 0, 1);
-            var addressHead = new FlowLayoutPanel
+            connectionCard.Controls.Add(mode, 0, 1);
+            addressHead = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.LeftToRight,
                 AutoSize = true,
                 WrapContents = false,
-                Margin = new Padding(0, 0, 0, 2)
+                Margin = new Padding(0, 0, 0, 4)
             };
-            var addressLabel = MakeLabel("服务器地址", 0, 0);
-            addressLabel.Margin = new Padding(0, 2, 6, 0);
+            var addressLabel = MakeMuted("服务器地址");
+            addressLabel.Margin = new Padding(0, 0, 6, 0);
             questionMark = new Label
             {
-                Text = "?",
+                Text = "",
                 AutoSize = false,
                 Size = new Size(16, 16),
-                Margin = new Padding(0, 2, 0, 0),
-                TextAlign = ContentAlignment.MiddleCenter
+                Margin = new Padding(0)
             };
             questionMark.Paint += delegate(object sender, PaintEventArgs args)
             {
-                args.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                using (var pen = new Pen(palette == null ? Color.FromArgb(11, 103, 159) : palette.Accent))
-                    args.Graphics.DrawEllipse(pen, 0, 0, 15, 15);
+                var accent = palette == null ? Color.FromArgb(11, 103, 159) : palette.Accent;
+                QuestionGlyph.Draw(args.Graphics, questionMark.ClientRectangle, accent);
             };
             addressHead.Controls.Add(addressLabel);
             addressHead.Controls.Add(questionMark);
-            connection.Controls.Add(addressHead, 0, 2);
-            var addressRow = new TableLayoutPanel
+            connectionCard.Controls.Add(addressHead, 0, 2);
+            addressRow = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
                 AutoSize = true,
                 ColumnCount = 2,
-                Margin = new Padding(0, 0, 0, 8)
+                Margin = new Padding(0, 0, 0, 10)
             };
             addressRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            addressRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 128F));
-            address = new ComboBox
+            addressRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112F));
+            address = new PlainAddress
             {
-                DropDownStyle = ComboBoxStyle.DropDown,
                 Dock = DockStyle.Fill,
                 Margin = new Padding(0, 0, 8, 0),
                 Text = "10.0.2.2"
             };
             address.TextChanged += delegate { UpdateClientConfig(); };
-            var restoreDefault = MakeButton("恢复默认", 0, 0, 120, 28);
-            restoreDefault.Dock = DockStyle.Fill;
-            restoreDefault.Margin = new Padding(0);
-            restoreDefault.Click += delegate { RestoreDeploymentDefaults(); };
+            restoreButton = MakeButton("恢复默认", 0, 0, 104, 28);
+            restoreButton.Dock = DockStyle.Fill;
+            restoreButton.Margin = new Padding(0);
+            restoreButton.Click += delegate { RestoreDeploymentDefaults(); };
             addressRow.Controls.Add(address, 0, 0);
-            addressRow.Controls.Add(restoreDefault, 1, 0);
-            connection.Controls.Add(addressRow, 0, 3);
-            connection.Controls.Add(MakeLabel("主端口", 0, 0), 0, 4);
-            port = new NumericUpDown
+            addressRow.Controls.Add(restoreButton, 1, 0);
+            connectionCard.Controls.Add(addressRow, 0, 3);
+            connectionCard.Controls.Add(MakeMuted("主端口"), 0, 4);
+            port = new PlainPort
             {
-                Width = 120,
+                Width = 112,
                 Margin = new Padding(0, 2, 0, 4),
                 Minimum = 1,
                 Maximum = 65533,
                 Value = 26020
             };
             port.ValueChanged += delegate { UpdateClientConfig(); };
-            connection.Controls.Add(port, 0, 5);
-            endpoints = new Label
-            {
-                Text = "游戏 26020 · 战斗 26021 · Admin 127.0.0.1:26022",
-                AutoSize = true,
-                Margin = new Padding(0, 4, 0, 0)
-            };
-            connection.Controls.Add(endpoints, 0, 6);
-            layout.Controls.Add(connection, 0, 1);
+            connectionCard.Controls.Add(port, 0, 5);
+            endpoints = MakeMuted("游戏 26020 · 战斗 26021 · Admin 127.0.0.1:26022");
+            endpoints.Margin = new Padding(0, 8, 0, 0);
+            connectionCard.Controls.Add(endpoints, 0, 6);
+            layout.Controls.Add(connectionCard, 0, 1);
 
             var actions = new TableLayoutPanel
             {
@@ -449,42 +380,116 @@ namespace KairiseiLauncher
             adminButton = MakeButton("Admin面板", 0, 0, 120, 36);
             adminButton.Dock = DockStyle.Fill;
             adminButton.Margin = new Padding(0, 0, 6, 0);
-            var logsButton = MakeButton("查看日志", 0, 0, 120, 36);
+            logsButton = MakeButton("查看日志", 0, 0, 120, 36);
             logsButton.Dock = DockStyle.Fill;
             logsButton.Margin = new Padding(6, 0, 0, 0);
             adminButton.Click += delegate { OpenAdmin(); };
+            adminButton.Paint += delegate(object sender, PaintEventArgs args)
+            {
+                if (adminButton.Enabled || palette == null) return;
+                args.Graphics.Clear(palette.Disabled);
+                TextRenderer.DrawText(args.Graphics, adminButton.Text, adminButton.Font, adminButton.ClientRectangle, Color.White,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            };
             logsButton.Click += delegate { OpenLogs(); };
             actions.Controls.Add(adminButton, 0, 1);
             actions.Controls.Add(logsButton, 1, 1);
             layout.Controls.Add(actions, 0, 2);
 
+            logHost = new Panel { Dock = DockStyle.Fill, Padding = new Padding(12, 10, 8, 10), Margin = new Padding(0, 4, 0, 0) };
+            logHost.Resize += delegate
+            {
+                logHost.Region = null;
+                logHost.Invalidate();
+            };
+            logHost.Paint += delegate(object sender, PaintEventArgs args)
+            {
+                if (palette == null) return;
+                args.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                using (var canvas = new SolidBrush(palette.Canvas))
+                    args.Graphics.FillRectangle(canvas, logHost.ClientRectangle);
+                using (var path = FieldChrome.Round(new Rectangle(0, 0, Math.Max(1, logHost.Width - 1), Math.Max(1, logHost.Height - 1)), 8))
+                using (var fill = new SolidBrush(palette.Surface))
+                using (var pen = new Pen(palette.Line))
+                {
+                    args.Graphics.FillPath(fill, path);
+                    args.Graphics.DrawPath(pen, path);
+                }
+            };
             activity = new TextBox
             {
                 Dock = DockStyle.Fill,
                 Multiline = true,
                 ReadOnly = true,
                 ScrollBars = ScrollBars.Vertical,
-                BorderStyle = BorderStyle.FixedSingle
+                BorderStyle = BorderStyle.None,
+                Font = new Font("Microsoft YaHei UI", 9F)
             };
-            layout.Controls.Add(activity, 0, 3);
-            layout.Controls.Add(new Label
+            logHost.Controls.Add(activity);
+            layout.Controls.Add(logHost, 0, 3);
+            var footerRow = new TableLayoutPanel
             {
-                Text = "请完整解压后运行；首次启动会创建全新本地存档。",
-                AutoSize = true,
                 Dock = DockStyle.Top,
+                AutoSize = true,
+                ColumnCount = 2,
                 Margin = new Padding(0, 8, 0, 0)
-            }, 0, 4);
+            };
+            footerRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            footerRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 28F));
+            footerRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            var footer = MakeMuted("请完整解压后运行；首次启动会创建全新本地存档。");
+            footer.Dock = DockStyle.Fill;
+            footer.TextAlign = ContentAlignment.MiddleLeft;
+            footer.Margin = new Padding(0, 2, 8, 0);
+            clientThemeButton = new Button
+            {
+                Size = new Size(22, 22),
+                Anchor = AnchorStyles.Right,
+                FlatStyle = FlatStyle.Flat,
+                TabStop = false,
+                Margin = new Padding(0, 1, 0, 0)
+            };
+            clientThemeButton.FlatAppearance.BorderSize = 0;
+            clientThemeButton.Click += delegate { CycleTheme(); };
+            clientThemeButton.Paint += delegate(object sender, PaintEventArgs args) { PaintThemeGlyph(args.Graphics, clientThemeButton.ClientRectangle); };
+            toolTip.SetToolTip(clientThemeButton, ThemeRules.Caption(themeChoice));
+            footerRow.Controls.Add(footer, 0, 0);
+            footerRow.Controls.Add(clientThemeButton, 1, 0);
+            layout.Controls.Add(footerRow, 0, 4);
 
             ApplyMode();
             ApplyServiceButton();
             AutoScaleDimensions = new SizeF(96F, 96F);
             AutoScaleMode = AutoScaleMode.Dpi;
             PerformAutoScale();
+            AlignAddressMark(addressLabel);
         }
 
-        private static Label MakeLabel(string text, int x, int y)
+        private void AlignAddressMark(Label label)
         {
-            return new Label { Text = text, Location = new Point(x, y), AutoSize = true };
+            if (label == null || questionMark == null) return;
+            label.Margin = new Padding(0, 0, 6, 0);
+            int side = label.Height > 0 ? label.Height : label.PreferredSize.Height;
+            questionMark.Size = new Size(side, side);
+            questionMark.Margin = new Padding(0);
+        }
+
+        private Label MakeMuted(string text)
+        {
+            return MakeMuted(text, Point.Empty);
+        }
+
+        private Label MakeMuted(string text, Point location)
+        {
+            var label = new Label
+            {
+                Text = text,
+                AutoSize = true,
+                Location = location,
+                Font = new Font("Microsoft YaHei UI", 9F)
+            };
+            mutedLabels.Add(label);
+            return label;
         }
 
         private static Button MakeButton(string text, int x, int y, int width, int height)
@@ -499,7 +504,24 @@ namespace KairiseiLauncher
                 UseVisualStyleBackColor = false
             };
             button.FlatAppearance.BorderSize = 0;
+            button.Resize += delegate { RoundControl(button, 8); };
             return button;
+        }
+
+        private static void RoundControl(Control control, int radius)
+        {
+            if (control == null || control.Width < radius * 2 || control.Height < radius * 2) return;
+            using (var path = new System.Drawing.Drawing2D.GraphicsPath())
+            {
+                int diameter = radius * 2;
+                var bounds = new Rectangle(0, 0, control.Width, control.Height);
+                path.AddArc(bounds.X, bounds.Y, diameter, diameter, 180, 90);
+                path.AddArc(bounds.Right - diameter, bounds.Y, diameter, diameter, 270, 90);
+                path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
+                path.AddArc(bounds.X, bounds.Bottom - diameter, diameter, diameter, 90, 90);
+                path.CloseFigure();
+                control.Region = new Region(path);
+            }
         }
 
         private void ApplyPalette()
@@ -508,29 +530,99 @@ namespace KairiseiLauncher
             BackColor = palette.Canvas;
             ForeColor = palette.Text;
             ColorControls(this);
+            if (connectionCard != null) connectionCard.BackColor = palette.Surface;
+            if (addressHead != null) addressHead.BackColor = palette.Surface;
+            if (addressRow != null) addressRow.BackColor = palette.Surface;
+            if (logHost != null)
+            {
+                logHost.Region = null;
+                logHost.BackColor = palette.Canvas;
+            }
             if (activity != null)
             {
                 activity.BackColor = palette.Surface;
-                activity.ForeColor = palette.Text;
+                activity.ForeColor = palette.Muted;
             }
-            if (stateBadge != null) stateBadge.ForeColor = latestState != null && latestState.IsReady ? palette.Success : palette.Muted;
+            bool dark = resolved == ResolvedTheme.Dark;
+            if (mode != null) mode.ApplyChrome(palette, dark);
+            if (address != null) address.ApplyChrome(palette, dark);
+            if (port != null) port.ApplyChrome(palette, dark);
+            for (int i = 0; i < mutedLabels.Count; i++)
+            {
+                mutedLabels[i].ForeColor = palette.Muted;
+                if (mutedLabels[i].Parent != null) mutedLabels[i].BackColor = mutedLabels[i].Parent.BackColor;
+            }
+            if (questionMark != null && questionMark.Parent != null) questionMark.BackColor = questionMark.Parent.BackColor;
+            StyleBadge();
+            StyleQuietButton(restoreButton);
+            StyleAdminButton();
+            StyleQuietButton(logsButton);
             ApplyServiceButton();
-            if (clientThemeButton != null) clientThemeButton.Invalidate();
-            if (captionHost != null) captionHost.Invalidate();
+            if (questionMark != null) questionMark.Invalidate();
+            if (clientThemeButton != null)
+            {
+                clientThemeButton.BackColor = palette.Canvas;
+                clientThemeButton.FlatAppearance.MouseOverBackColor = palette.Canvas;
+                clientThemeButton.FlatAppearance.MouseDownBackColor = palette.Canvas;
+                clientThemeButton.UseVisualStyleBackColor = false;
+                clientThemeButton.Invalidate();
+            }
+            RoundControl(connectionCard, 10);
+            RoundControl(iconBox, 8);
             TitleBarTheme.Apply(Handle, resolved);
+        }
+
+        private void StyleQuietButton(Button button)
+        {
+            if (button == null || palette == null) return;
+            button.BackColor = palette.PaleButton;
+            button.ForeColor = palette.Accent;
+            button.FlatAppearance.MouseOverBackColor = palette.PaleButton;
+            button.FlatAppearance.MouseDownBackColor = palette.PaleButton;
+            RoundControl(button, 8);
+        }
+
+        private void StyleAdminButton()
+        {
+            if (adminButton == null || palette == null) return;
+            var fill = adminButton.Enabled ? palette.PaleButton : palette.Disabled;
+            var text = adminButton.Enabled ? palette.Accent : Color.White;
+            adminButton.BackColor = fill;
+            adminButton.ForeColor = text;
+            adminButton.FlatAppearance.MouseOverBackColor = fill;
+            adminButton.FlatAppearance.MouseDownBackColor = fill;
+            adminButton.UseVisualStyleBackColor = false;
+            RoundControl(adminButton, 8);
+        }
+
+        private void StyleBadge()
+        {
+            if (stateBadge == null || palette == null) return;
+            bool running = latestState != null && latestState.IsReady;
+            bool checking = !initialCheckComplete || (latestState != null && !latestState.IsReady);
+            if (checking) stateBadge.ForeColor = palette.Muted;
+            else if (running) stateBadge.ForeColor = palette.Success;
+            else stateBadge.ForeColor = palette.Accent;
+            if (running) stateBadge.BackColor = resolved == ResolvedTheme.Dark ? Color.FromArgb(28, 58, 46) : Color.FromArgb(226, 245, 234);
+            else stateBadge.BackColor = palette.PaleButton;
+            RoundControl(stateBadge, Math.Max(8, stateBadge.Height / 2));
         }
 
         private void ColorControls(Control parent)
         {
             foreach (Control control in parent.Controls)
             {
-                if (control == powerButton || control == adminButton) { }
+                if (control == powerButton || control == adminButton || control == logsButton || control == restoreButton || control == clientThemeButton) { }
                 else if (control is Button)
                 {
                     control.BackColor = palette.PaleButton;
                     control.ForeColor = palette.Accent;
                 }
-                else if (control is TextBox || control is ComboBox || control is NumericUpDown)
+                else if (control is PlainSelect || control is PlainAddress || control is PlainPort)
+                {
+                    control.BackColor = palette.Surface;
+                }
+                else if (control is TextBox)
                 {
                     control.BackColor = palette.Surface;
                     control.ForeColor = palette.Text;
@@ -551,7 +643,6 @@ namespace KairiseiLauncher
             LauncherPreferencesStore.TrySave(LauncherPreferencesStore.DefaultPath, preferences);
             resolved = ThemeRules.Resolve(themeChoice, ReadAppsUseLightTheme());
             toolTip.SetToolTip(clientThemeButton, ThemeRules.Caption(themeChoice));
-            toolTip.SetToolTip(captionHost, ThemeRules.Caption(themeChoice));
             ApplyPalette();
         }
 
@@ -575,37 +666,26 @@ namespace KairiseiLauncher
             catch { return null; }
         }
 
-        private void PlaceThemeButton()
-        {
-            if (!IsHandleCreated || captionHost == null || clientThemeButton == null) return;
-            RECT caption;
-            RECT window;
-            int status = DwmGetWindowAttribute(Handle, 5, out caption, Marshal.SizeOf(typeof(RECT)));
-            GetWindowRect(Handle, out window);
-            int themeLeft = window.Left + caption.Left - 20;
-            bool fallback = status != 0 || caption.Right <= caption.Left || themeLeft < window.Left + 48;
-            if (fallback)
-            {
-                captionHost.Hide();
-                clientThemeButton.Visible = true;
-                if (clientThemeButton.Parent != null) PlaceHeaderChrome(clientThemeButton.Parent);
-                return;
-            }
-            clientThemeButton.Visible = false;
-            if (clientThemeButton.Parent != null) PlaceHeaderChrome(clientThemeButton.Parent);
-            int top = window.Top + caption.Top + Math.Max(0, (caption.Bottom - caption.Top - 16) / 2);
-            captionHost.Bounds = new Rectangle(themeLeft, top, 16, 16);
-            if (!captionHost.Visible) captionHost.Show(this);
-        }
-
         private void PlaceHeaderChrome(Control header)
         {
-            if (stateBadge == null || clientThemeButton == null || header == null) return;
-            var reserve = clientThemeButton.Visible ? clientThemeButton.Width + 6 : 0;
-            clientThemeButton.Left = Math.Max(0, header.ClientSize.Width - clientThemeButton.Width - 2);
-            clientThemeButton.Top = 2;
-            stateBadge.Left = Math.Max(0, header.ClientSize.Width - stateBadge.PreferredSize.Width - reserve);
+            if (stateBadge == null || header == null) return;
+            stateBadge.Left = Math.Max(0, header.ClientSize.Width - stateBadge.PreferredSize.Width);
             stateBadge.Top = 4;
+        }
+
+        private Icon LoadWindowIcon()
+        {
+            Icon loaded = null;
+            try { loaded = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
+            if (loaded == null)
+            {
+                var iconFile = Path.Combine(root, "resource-set", "launcher.ico");
+                if (File.Exists(iconFile))
+                {
+                    try { loaded = new Icon(iconFile); } catch { }
+                }
+            }
+            return loaded ?? SystemIcons.Application;
         }
 
         private void PopulateAddresses()
@@ -836,7 +916,7 @@ namespace KairiseiLauncher
             if (!initialCheckComplete || (state != null && !state.IsReady)) stateBadge.Text = "● 检测中";
             else if (running) stateBadge.Text = "● 正在运行";
             else stateBadge.Text = "● 未运行";
-            stateBadge.ForeColor = running ? palette.Success : palette.Muted;
+            StyleBadge();
             if (stateBadge.Parent != null) PlaceHeaderChrome(stateBadge.Parent);
             ApplyServiceButton();
             bool inputs = operationKind == OperationKind.None;
@@ -859,13 +939,25 @@ namespace KairiseiLauncher
                         address.Text = runningHost;
                     }
                 }
-                activity.Text = operationMessage + "\r\n服务运行中（PID " + state.process_id + "）\r\n客户端填写：" + state.advertise_host + ":" + state.port;
+                var detail = "服务运行中（PID " + state.process_id + "）\r\n客户端填写：" + state.advertise_host + ":" + state.port;
+                activity.Text = operationMessage.Length == 0 ? detail : operationMessage + "\r\n" + detail;
+                FitLogScroll();
             }
             else
             {
-                activity.Text = operationMessage + (state != null ? "\r\n服务进程存在，正在确认健康状态。" :
-                    busy ? "" : "\r\n服务尚未运行。选择连接方式后点击「启动服务」。");
+                var detail = state != null ? "服务进程存在，正在确认健康状态。" :
+                    busy ? "" : "服务尚未运行。选择连接方式后点击「启动服务」。";
+                activity.Text = operationMessage.Length == 0 ? detail : operationMessage + "\r\n" + detail;
+                FitLogScroll();
             }
+        }
+
+        private void FitLogScroll()
+        {
+            if (activity == null || activity.Font == null) return;
+            int lines = activity.GetLineFromCharIndex(Math.Max(0, activity.TextLength - 1)) + 1;
+            int visible = Math.Max(1, activity.ClientSize.Height / Math.Max(1, activity.Font.Height));
+            activity.ScrollBars = lines > visible ? ScrollBars.Vertical : ScrollBars.None;
         }
 
         private void ApplyServiceButton()
@@ -889,8 +981,10 @@ namespace KairiseiLauncher
                 powerButton.BackColor = palette.Start;
                 powerButton.ForeColor = Color.White;
             }
-            adminButton.BackColor = palette.PaleButton;
-            adminButton.ForeColor = palette.Accent;
+            powerButton.FlatAppearance.MouseOverBackColor = powerButton.BackColor;
+            powerButton.FlatAppearance.MouseDownBackColor = powerButton.BackColor;
+            RoundControl(powerButton, 8);
+            StyleAdminButton();
         }
 
         private void OpenAdmin()
@@ -925,51 +1019,5 @@ namespace KairiseiLauncher
             MessageBox.Show(this, message, "乖离性服务端启动器", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
 
-        [DllImport("dwmapi.dll")]
-        private static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out RECT bounds, int size);
-
-        [DllImport("user32.dll")]
-        private static extern bool GetWindowRect(IntPtr window, out RECT bounds);
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct RECT
-        {
-            public int Left, Top, Right, Bottom;
-        }
-
-        private sealed class ThemeCaptionHost : Form
-        {
-            private readonly Action click;
-            private readonly Action<Graphics, Rectangle> paint;
-
-            public ThemeCaptionHost(Action click, Action<Graphics, Rectangle> paint)
-            {
-                this.click = click;
-                this.paint = paint;
-                FormBorderStyle = FormBorderStyle.None;
-                ShowInTaskbar = false;
-                StartPosition = FormStartPosition.Manual;
-                Size = new Size(16, 16);
-                Click += delegate { click(); };
-            }
-
-            protected override bool ShowWithoutActivation { get { return true; } }
-
-            protected override CreateParams CreateParams
-            {
-                get
-                {
-                    var parameters = base.CreateParams;
-                    parameters.ExStyle |= 0x00000080 | 0x08000000;
-                    return parameters;
-                }
-            }
-
-            protected override void OnPaint(PaintEventArgs e)
-            {
-                base.OnPaint(e);
-                paint(e.Graphics, ClientRectangle);
-            }
-        }
     }
 }

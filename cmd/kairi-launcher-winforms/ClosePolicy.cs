@@ -16,7 +16,6 @@ namespace KairiseiLauncher
             if (action == CloseAction.Ask) return CloseOutcome.ShowPrompt;
             if (action == CloseAction.Tray) return CloseOutcome.HideToTray;
             if (operationBusy) return CloseOutcome.StayBecauseBusy;
-            if (serverRunning) return CloseOutcome.ExitAfterStop;
             return CloseOutcome.ExitLauncher;
         }
 

@@ -30,7 +30,7 @@ namespace KairiseiLauncher
         {
             var values = new Dictionary<string, object> { { "AdvertiseHost", host }, { "Port", port } };
             if (validationOnly) values.Add("ValidationOnly", true);
-            return ExecuteAsync("Start-Server.ps1", values, 90);
+            return ExecuteAsync("Start-Server.ps1", values, 150);
         }
 
         public Task<OperationResult> StopAsync()

@@ -103,7 +103,7 @@ namespace KairiseiLauncher
             Expect(failures, ClosePolicy.ForUserClose(CloseAction.Ask, true, false) == CloseOutcome.ShowPrompt, "ask shows prompt");
             Expect(failures, ClosePolicy.ForUserClose(CloseAction.Tray, true, true) == CloseOutcome.HideToTray, "tray hides even while busy");
             Expect(failures, ClosePolicy.ForUserClose(CloseAction.Exit, false, false) == CloseOutcome.ExitLauncher, "exit with no server");
-            Expect(failures, ClosePolicy.ForUserClose(CloseAction.Exit, true, false) == CloseOutcome.ExitAfterStop, "exit stops a running server");
+            Expect(failures, ClosePolicy.ForUserClose(CloseAction.Exit, true, false) == CloseOutcome.ExitLauncher, "exit leaves a running server");
             Expect(failures, ClosePolicy.ForUserClose(CloseAction.Exit, true, true) == CloseOutcome.StayBecauseBusy, "busy exit stays");
             Expect(failures, ClosePolicy.ForShutdown(false) == CloseOutcome.ExitLauncher, "shutdown without server");
             Expect(failures, ClosePolicy.ForShutdown(true) == CloseOutcome.ExitAfterStop, "shutdown stops server");
@@ -124,20 +124,22 @@ namespace KairiseiLauncher
             using (var bitmap = new Bitmap(64, 64))
             using (var graphics = Graphics.FromImage(bitmap))
             {
-                graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
                 graphics.Clear(Color.Magenta);
+                var ink = Color.FromArgb(23, 55, 78);
+                var lightInk = Color.FromArgb(230, 238, 244);
                 ThemeIcon.Draw(graphics, new Rectangle(16, 16, 32, 32), ThemeChoice.Light, false);
-                Expect(failures, Near(bitmap.GetPixel(32, 32), Color.White), "sun center is white");
-                Expect(failures, bitmap.GetPixel(0, 0).ToArgb() == Color.Magenta.ToArgb(), "light title bar has no white halo");
+                Expect(failures, bitmap.GetPixel(32, 32).ToArgb() == Color.Magenta.ToArgb(), "sun center stays open");
+                Expect(failures, Near(bitmap.GetPixel(32, 20), ink), "sun ring is dark on a light surface");
 
-                graphics.Clear(Color.FromArgb(43, 53, 68));
+                graphics.Clear(Color.Magenta);
                 ThemeIcon.Draw(graphics, new Rectangle(16, 16, 32, 32), ThemeChoice.System, false);
-                Expect(failures, Near(bitmap.GetPixel(24, 32), Color.Black), "follow crescent is black");
-                Expect(failures, Near(bitmap.GetPixel(40, 32), Color.White), "follow right side is white");
+                Expect(failures, Near(bitmap.GetPixel(24, 32), ink), "follow crescent is filled");
+                Expect(failures, bitmap.GetPixel(40, 32).ToArgb() == Color.Magenta.ToArgb(), "follow right side stays open");
 
-                graphics.Clear(Color.FromArgb(43, 53, 68));
+                graphics.Clear(Color.Magenta);
                 ThemeIcon.Draw(graphics, new Rectangle(16, 16, 32, 32), ThemeChoice.Dark, true);
-                Expect(failures, Near(bitmap.GetPixel(18, 32), Color.White) || Near(bitmap.GetPixel(17, 32), Color.White), "dark title bar halo is white");
+                Expect(failures, Near(bitmap.GetPixel(24, 32), lightInk), "moon is light on a dark surface");
+                Expect(failures, bitmap.GetPixel(40, 32).ToArgb() == Color.Magenta.ToArgb(), "moon leaves the right side open");
             }
         }
 
