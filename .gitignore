@@ -2,6 +2,7 @@
 /release/
 /.idea/
 /.superpowers/
+/.worktrees/
 /.vscode/
 /.codex-remote-attachments/
 **/bin/
