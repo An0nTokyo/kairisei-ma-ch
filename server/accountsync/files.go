@@ -75,6 +75,7 @@ var extraMasterNames = map[string]struct{}{
 	"stamps.bin":      {},
 	"honors.bin":      {},
 	"login-bonus.bin": {},
-	"battle.bin":      {},
-	"pvp.bin":         {},
+	"battle.bin":                     {},
+	"pvp.bin":                        {},
+	"cn602-normal-quest-runtime.json": {},
 }

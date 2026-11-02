@@ -7,6 +7,43 @@ import (
 	"testing"
 )
 
+func TestTransferCopiesAccountCredential(t *testing.T) {
+	storage := openMigrationDatabase(t)
+	if _, err := storage.LoadOrImport(); err != nil {
+		t.Fatal(err)
+	}
+	accounts, err := NewAccounts(storage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := accounts.ResolveLogin("00000000-0000-4000-8000-0000000000c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	salt, hash, err := PasswordHash("secret-pass")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := accounts.WriteCredentials(identity.UserID, "player_one", salt, hash, true); err != nil {
+		t.Fatal(err)
+	}
+	transfer, err := accounts.ExportAccount(identity.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transfer.Credential.Username != "player_one" || len(transfer.Credential.Hash) != 32 {
+		t.Fatalf("exported credential = %+v", transfer.Credential.Username)
+	}
+	mustExec(t, storage, `DELETE FROM cn_account_credentials WHERE user_id = ?`, identity.UserID)
+	if err := accounts.ImportAccount(transfer); err != nil {
+		t.Fatal(err)
+	}
+	binding, err := accounts.LoginAccount("player_one", "secret-pass")
+	if err != nil || binding.UserID != identity.UserID {
+		t.Fatalf("login = %+v %v", binding, err)
+	}
+}
+
 func TestImportAccountIsIdempotent(t *testing.T) {
 	storage := openMigrationDatabase(t)
 	if _, err := storage.LoadOrImport(); err != nil {

@@ -1,6 +1,8 @@
 package sync
 
 import (
+	"path/filepath"
+
 	"kairisei.local/server/accountsync"
 	"kairisei.local/server/localcn"
 )
@@ -29,6 +31,9 @@ func (phone phoneStore) EnsureLogin(userID int, loginUUID, session string) error
 func (phone phoneStore) Import(raw []byte) error { return phone.store.ImportTransferJSON(raw) }
 
 func (phone phoneStore) Export(userID int) ([]byte, error) {
+	if _, err := phone.store.InstallCardCatalog(filepath.Join(phone.dir, "masters", "cards.bin")); err != nil {
+		return nil, err
+	}
 	return phone.store.ExportTransferJSON(userID)
 }
 

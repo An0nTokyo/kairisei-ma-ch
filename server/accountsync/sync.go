@@ -468,12 +468,13 @@ func post(baseURL, token, path string, body any, dest any, choice **ChoiceRequir
 }
 
 type transferDocument struct {
-	UserID         int             `json:"UserID"`
-	Revision       int             `json:"Revision"`
-	Metadata       []byte          `json:"Metadata"`
-	MetadataDigest string          `json:"MetadataDigest"`
-	MasterDigest   string          `json:"MasterDigest"`
-	Account        json.RawMessage `json:"Account"`
+	UserID         int                            `json:"UserID"`
+	Revision       int                            `json:"Revision"`
+	Metadata       []byte                         `json:"Metadata"`
+	MetadataDigest string                         `json:"MetadataDigest"`
+	MasterDigest   string                         `json:"MasterDigest"`
+	Account        json.RawMessage                `json:"Account"`
+	Credential     accountstore.AccountCredential `json:"Credential,omitempty"`
 }
 
 func setMasterDigest(raw []byte, digest string) ([]byte, int, error) {

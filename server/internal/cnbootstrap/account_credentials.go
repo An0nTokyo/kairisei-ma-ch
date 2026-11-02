@@ -19,6 +19,10 @@ type cnAccountGateway struct {
 	workers  chan struct{}
 }
 
+func AccountHandler(accounts *accountstore.Accounts) http.Handler {
+	return newCNAccountGateway(accounts)
+}
+
 func newCNAccountGateway(accounts *accountstore.Accounts) *cnAccountGateway {
 	return &cnAccountGateway{accounts: accounts, requests: make(map[string][]time.Time), workers: make(chan struct{}, 4)}
 }

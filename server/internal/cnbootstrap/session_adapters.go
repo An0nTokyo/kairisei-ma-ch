@@ -153,6 +153,10 @@ func cnBootstrapPushRegistration(writer http.ResponseWriter, _ *http.Request) {
 }
 
 func cnBootstrapModuleSwitches(writer http.ResponseWriter, _ *http.Request) {
+	WriteModuleSwitches(writer)
+}
+
+func WriteModuleSwitches(writer http.ResponseWriter) {
 	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	writer.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(writer).Encode(map[string]any{

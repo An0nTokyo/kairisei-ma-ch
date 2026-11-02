@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"os"
+	"path/filepath"
 
 	"kairisei.local/server/accountsync"
 	"kairisei.local/server/internal/accountstore"
@@ -117,6 +118,14 @@ func (db accountSyncDB) ExtraMasters() (map[string][]byte, error) {
 			return nil, err
 		}
 		files[name] = body
+	}
+	if battle := db.masters.Battle; battle != "" {
+		questPath := filepath.Join(filepath.Dir(battle), "cn602-normal-quest-runtime.json")
+		body, err := os.ReadFile(questPath)
+		if err != nil {
+			return nil, err
+		}
+		files["cn602-normal-quest-runtime.json"] = body
 	}
 	return files, nil
 }

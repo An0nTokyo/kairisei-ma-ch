@@ -9,6 +9,7 @@ import (
 
 	"kairisei.local/server/internal/accountstore"
 	"kairisei.local/server/internal/cnbootstrap"
+	"kairisei.local/server/internal/masterdata"
 )
 
 const ServerHolderID = "s"
@@ -67,12 +68,40 @@ func MasterDigest(cards, growth []byte) string {
 	return accountstore.MasterDigest(cards, growth)
 }
 
+func (store *Store) InstallCardCatalog(cardsPath string) (int, error) {
+	if store == nil || store.accounts == nil {
+		return 0, errors.New("CN store has no database")
+	}
+	master, err := masterdata.LoadCardRuntimeMaster(cardsPath)
+	if err != nil {
+		return 0, err
+	}
+	catalog, err := store.accounts.Database().CatalogState()
+	if err != nil {
+		return 0, err
+	}
+	if _, err := masterdata.ApplyCardRuntimeMaster(&catalog, master); err != nil {
+		return 0, err
+	}
+	store.accounts.Database().SetCatalog(catalog)
+	return len(catalog.CardTemplates), nil
+}
+
 func (store *Store) ExportTransferJSON(userID int) ([]byte, error) {
 	transfer, err := store.accounts.ExportAccount(userID)
 	if err != nil {
 		return nil, err
 	}
 	return json.Marshal(transfer)
+}
+
+func (store *Store) AccountHandler() http.Handler {
+	if store == nil || store.accounts == nil {
+		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			http.NotFound(writer, request)
+		})
+	}
+	return cnbootstrap.AccountHandler(store.accounts)
 }
 
 func (store *Store) ImportTransferJSON(raw []byte) error {
@@ -230,10 +259,26 @@ func (store *Store) SessionKey(userID int) (string, error) {
 	return session, err
 }
 
-func (store *Store) WriteHeldLogin(writer http.ResponseWriter, request *http.Request, host string, port int) {
-	cnbootstrap.LoginHandler(store.accounts, host, port).ServeHTTP(writer, request)
+func (store *Store) WriteHeldLogin(writer http.ResponseWriter, request *http.Request, host string, port int, catalog, cpkList, cpkState []byte) {
+	cnbootstrap.LoginHandlerForCatalogs(store.accounts, host, port, catalog, cpkList, cpkState).ServeHTTP(writer, request)
+}
+
+func ResourceVersionNamespace(catalog, cpkList, cpkState []byte) string {
+	return cnbootstrap.ResourceVersionNamespace(catalog, cpkList, cpkState)
+}
+
+func WriteProducts(writer http.ResponseWriter, request *http.Request) {
+	cnbootstrap.WriteProducts(writer, request)
+}
+
+func WritePlaceholderPNG(writer http.ResponseWriter, request *http.Request) {
+	cnbootstrap.WritePlaceholderPNG(writer, request)
 }
 
 func WriteServerList(writer http.ResponseWriter, request *http.Request, host string, port int) {
 	cnbootstrap.ServerListHandler(host, port).ServeHTTP(writer, request)
+}
+
+func WriteModuleSwitches(writer http.ResponseWriter) {
+	cnbootstrap.WriteModuleSwitches(writer)
 }
